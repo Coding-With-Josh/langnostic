@@ -2,8 +2,8 @@
 import os
 import tempfile
 
-from speechgap.train import (GenerateGuard, assert_language_kwargs, cap_rows,
-                             check_disjoint, check_homogeneous,
+from speechgap.train import (GenerateGuard, assert_language_kwargs, build_lora_config,
+                             cap_rows, check_disjoint, check_homogeneous,
                              degenerate_reasons, example_lines,
                              force_generation_kwargs, pilot_gates,
                              probe_durations, prompt_language_check,
@@ -107,6 +107,17 @@ def test_assert_language_kwargs_rejects_every_unforced_call():
         except ValueError:
             continue
         raise AssertionError(f"must refuse {kwargs}")
+
+
+def test_lora_config_does_not_use_the_seq2seq_wrapper():
+    # Regression: PeftModelForSeq2SeqLM.forward passes input_ids=None to a Whisper
+    # forward that has no such parameter, which crashes the first training step
+    # with "WhisperDecoder() got multiple values for keyword argument 'input_ids'".
+    # A generic PeftModel (task_type=None) forwards input_features untouched.
+    cfg = build_lora_config()
+    assert cfg.task_type is None
+    assert tuple(cfg.target_modules) == ("q_proj", "v_proj")
+    assert (cfg.r, cfg.lora_alpha, cfg.lora_dropout) == (8, 16, 0.05)
 
 
 def test_force_generation_kwargs_installs_and_survives_the_trainer_rebuild():

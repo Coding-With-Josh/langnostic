@@ -50,6 +50,16 @@ from .report import diacritic_retention, truncate_hyp, wrong_script_rate
 # Fixed analysis-plan defaults. Changing these is a deviations-log change.
 LORA_TARGETS = ("q_proj", "v_proj")
 
+# Deliberately None, not "SEQ_2_SEQ_LM". With that task type peft wraps Whisper in
+# PeftModelForSeq2SeqLM, whose forward passes ``input_ids=None`` to the base model.
+# Whisper's forward has no ``input_ids`` parameter, so the value falls into
+# ``**kwargs`` and is forwarded to ``self.decoder(input_ids=decoder_input_ids,
+# ..., **kwargs)`` -- a duplicate keyword, raised as a TypeError on the first
+# training step. A generic PeftModel forwards ``input_features`` untouched; the LoRA
+# layers still inject, and ``adapter_config.json`` reloads as PeftModel, which is
+# what ``eval.py --adapter`` merges. Regression-tested in tests/test_train.py.
+LORA_TASK_TYPE = None
+
 # Pilot pass conditions (ANALYSIS_PLAN.md). A run that misses any of them
 # publishes nothing, so its number can never be quoted as an adapter result.
 PILOT_MAX_VAL_WER = 1.0
@@ -419,6 +429,25 @@ def _dataset_classes(processor):
     return ManifestDataset, Collator
 
 
+def build_lora_config(r=8, alpha=16, dropout=0.05):
+    """The adapter config, in one place so its task type cannot drift.
+
+    ``task_type`` must stay ``None``; see ``LORA_TASK_TYPE`` for the failure it
+    avoids. Kept as a function so a test can assert it without downloading a
+    model.
+    """
+    from peft import LoraConfig
+
+    return LoraConfig(
+        r=r,
+        lora_alpha=alpha,
+        lora_dropout=dropout,
+        target_modules=list(LORA_TARGETS),
+        bias="none",
+        task_type=LORA_TASK_TYPE,
+    )
+
+
 def _trainer_class():
     import torch
     from transformers import Seq2SeqTrainer
@@ -530,7 +559,7 @@ def train(args):
 
     import torch
     import transformers
-    from peft import LoraConfig, get_peft_model
+    from peft import get_peft_model
     from transformers import (EarlyStoppingCallback, Seq2SeqTrainingArguments,
                               WhisperForConditionalGeneration, WhisperProcessor,
                               set_seed)
@@ -560,14 +589,7 @@ def train(args):
         }
         base.generation_config.is_multilingual = True
 
-    lora = LoraConfig(
-        r=args.lora_r,
-        lora_alpha=args.lora_alpha,
-        lora_dropout=args.lora_dropout,
-        target_modules=list(LORA_TARGETS),
-        bias="none",
-        task_type="SEQ_2_SEQ_LM",
-    )
+    lora = build_lora_config(args.lora_r, args.lora_alpha, args.lora_dropout)
     model = get_peft_model(base, lora)
     model.print_trainable_parameters()
 
@@ -706,7 +728,8 @@ def train(args):
             "language_forced": forced,
             "pilot_gates": gates,
             "lora": {"r": args.lora_r, "alpha": args.lora_alpha,
-                     "dropout": args.lora_dropout, "targets": list(LORA_TARGETS)},
+                     "dropout": args.lora_dropout, "targets": list(LORA_TARGETS),
+                     "task_type": LORA_TASK_TYPE},
             "minutes_requested": args.minutes,
             "train_minutes_actual": round(seconds / 60, 3),
             "train_clips": len(selected),
