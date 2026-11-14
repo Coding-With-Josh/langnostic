@@ -209,6 +209,20 @@ def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
     if done:
         print(f"resume: {len(done)} clips already cached")
 
+    # Resolve and check every pending audio path before loading the model: a
+    # broken manifest should not cost a 1 GB download first.
+    audio_root = os.path.dirname(os.path.abspath(manifest))
+    pending_paths = {}
+    for r in rows:
+        if r["utt_id"] in done:
+            continue
+        p = r["audio"]
+        if not os.path.isabs(p):
+            p = os.path.join(audio_root, p)
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"{r['utt_id']}: audio not found at {p}")
+        pending_paths[r["utt_id"]] = p
+
     import torch
     from transformers import pipeline
 
@@ -259,21 +273,13 @@ def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
         buckets.setdefault(resolved[r["utt_id"]], []).append(r)
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    audio_root = os.path.dirname(os.path.abspath(manifest))
     written = 0
     with open(part_path, "a", encoding="utf-8") as out:
         for lang in sorted(buckets, key=lambda x: (x is not None, x or "")):
             bucket = buckets[lang]
             for start in range(0, len(bucket), batch_size):
                 chunk = bucket[start:start + batch_size]
-                paths = []
-                for r in chunk:
-                    p = r["audio"]
-                    if not os.path.isabs(p):
-                        p = os.path.join(audio_root, p)
-                    if not os.path.exists(p):
-                        raise FileNotFoundError(f"{r['utt_id']}: audio not found at {p}")
-                    paths.append(p)
+                paths = [pending_paths[r["utt_id"]] for r in chunk]
                 kwargs = {"task": "transcribe"}
                 if lang:
                     kwargs["language"] = lang

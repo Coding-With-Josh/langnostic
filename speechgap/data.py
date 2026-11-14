@@ -605,6 +605,14 @@ def build(args):
                 rec = make_record(uid, rel, cand["speaker_key"], cand["group"],
                                   cand["ref"], cand["language"])
                 handles[cand["split"]].write(json.dumps(rec, ensure_ascii=False) + "\n")
+            if kind == "voxpopuli" and name == "en_accented" and extra:
+                # A typo in --accents would otherwise build zero rows silently.
+                missing = [a for a in extra if accents_seen.get(a, 0) == 0]
+                if missing:
+                    raise ValueError(
+                        f"accent labels {missing} never appeared; saw "
+                        f"{sorted(accents_seen)}"
+                    )
         for h in handles.values():
             h.flush()
             os.fsync(h.fileno())

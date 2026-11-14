@@ -85,6 +85,17 @@ def test_resume_refuses_a_partial_from_another_manifest():
             raise AssertionError("foreign partial must be refused")
 
 
+def test_report_refuses_a_partial_cache():
+    from speechgap.report import load_jsonl
+
+    try:
+        load_jsonl("results/cache/zero_shot.jsonl.part")
+    except ValueError as e:
+        assert ".part" in str(e)
+    else:
+        raise AssertionError("a .part cache must not be scored")
+
+
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, ".")

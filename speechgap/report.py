@@ -15,6 +15,10 @@ from .normalize import normalize
 
 
 def load_jsonl(path):
+    # A .part cache is an interrupted transcription, not a result. Refuse it so
+    # a partial run can never be scored as if it were complete.
+    if str(path).endswith(".part"):
+        raise ValueError(f"{path} is an interrupted cache (.part); finish or resume the run")
     with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
