@@ -22,8 +22,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # metrics/report use only the standard library, so CI needs no pip install.
-      - name: metrics tests
-        run: PYTHONPATH=. python tests/test_metrics.py
+      # pure-python tests: metrics, manifest contract, build invariants, cache resume.
+      - name: stdlib tests
+        run: |
+          PYTHONPATH=. python tests/test_metrics.py
+          PYTHONPATH=. python tests/test_data.py
+          PYTHONPATH=. python tests/test_eval.py
 
       - name: report cli smoke test
         run: PYTHONPATH=. python -m speechgap.report tests/fixtures/tiny_report.jsonl

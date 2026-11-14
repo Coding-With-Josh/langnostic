@@ -1,14 +1,18 @@
-# apple silicon: install torch (pip install torch) and ffmpeg (brew install ffmpeg) first,
-# then: pip install -r requirements.txt
+# Local laptop: tests, scoring cached jsonl, gradio development only.
+# Colab/Kaggle: the same file installs the model + dataset stack.
+# torch is preinstalled on Colab; on Apple silicon install it first: pip install torch
+# and get an audio decoder: brew install ffmpeg
 transformers
 datasets
 accelerate
 peft
 jiwer
 soundfile
+soxr
 librosa
 pandas
 matplotlib
 gradio
 huggingface_hub
+aiohttp
 pytest

@@ -19,42 +19,68 @@ Nothing here is a finding yet.
 | `ANALYSIS_PLAN.md` | hypotheses, splits, metrics and decision rules, committed before any experiment |
 | `speechgap/normalize.py` | text normalization (fixed per language) |
 | `speechgap/metrics.py` | wer / cer, error mix, speaker-clustered bootstrap intervals, hallucination check |
-| `speechgap/eval.py` | transcribe a manifest with whisper (+ optional adapter), cache the output; runs on CPU or MPS. **not run yet** |
-| `speechgap/report.py` | score cached transcripts per group |
-| `tests/` | tests for the metrics (`python tests/test_metrics.py`, or pytest) |
+| `speechgap/languages.py` | language names → whisper codes; refuses codes the checkpoint lacks |
+| `speechgap/data.py` | build speaker-disjoint manifests from public datasets (runs where the data is: Colab) |
+| `speechgap/eval.py` | transcribe a manifest with whisper (+ optional adapter), cache the output; Colab T4 or MPS |
+| `speechgap/report.py` | score cached transcripts per group; no model needed |
+| `tests/` | stdlib tests: metrics, manifest contract, split/cap invariants, cache resume |
 | `tests/fixtures/` | a tiny transcript file the report CLI can run against without a model |
-| `.github/workflows/tests.yml` | CPU-only CI: metrics tests plus a report smoke test |
-| `results/cache/` | cached transcripts, committed so the notebook runs fast |
+| `.github/workflows/tests.yml` | CPU-only CI: all stdlib tests plus a report smoke test |
+| `results/cache/` | cached transcripts, committed so scoring and the demo run without a GPU |
 | `data/` | local audio and manifests, git-ignored |
-| `notebooks/` | the submission notebook (loads cached results by default) |
+| `notebooks/` | the Colab runner (build → transcribe → report) |
 
-## quick start
+## quick start (laptop: no model, no downloads)
 
 ```bash
-# apple silicon: install torch and an audio decoder first
-pip install torch
-brew install ffmpeg
+python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
+brew install ffmpeg           # only needed if you decode audio locally
 
-PYTHONPATH=. python tests/test_metrics.py          # sanity check the metrics
+PYTHONPATH=. python tests/test_metrics.py
+PYTHONPATH=. python tests/test_data.py
+PYTHONPATH=. python tests/test_eval.py
 PYTHONPATH=. python -m speechgap.report tests/fixtures/tiny_report.jsonl
+
+PYTHONPATH=. python -m speechgap.data build --dry-run \
+    --naija yoruba:0-0 --voxpopuli en_accented:test en:test
 ```
 
 ## compute
 
-whisper-small runs locally on the M2 with `--device mps` (CPU works but is slower).
-Transcribing a few hundred clips is comfortable; training the LoRA adapter locally is
-possible but slow, so use a rented GPU or Colab only for that step. `requirements.txt` is
-unpinned, so record the versions that work once the pipeline first runs.
+All model work happens in a free **Colab T4** (Kaggle T4 as backup): dataset streaming,
+whisper transcription, and LoRA training. The laptop only runs tests, scores cached JSONL,
+and develops the Gradio demo. `speechgap.eval --device cuda` refuses to fall back silently
+if CUDA is absent.
 
-GitHub Actions is CPU-only and intentionally dependency-free: it runs the metrics tests and
-the report smoke test, not whisper or training.
+The cache is the only artifact that comes back from Colab: `results/cache/*.jsonl` plus its
+`.meta.json` sidecar. Audio and manifests stay in the Colab session (or Drive); they are
+regenerable and git-ignored.
+
+```bash
+# inside Colab, from the repo root
+python -m speechgap.data build --out-dir data --naija yoruba:0-0 \
+    --voxpopuli en_accented:test en:test --accents en_nl,en_de,en_cs
+python -m speechgap.data verify --out-dir data
+python -m speechgap.eval --manifest data/manifest_test.jsonl --device cuda \
+    --out results/cache/zero_shot.jsonl
+```
+
+A transcription run writes `<out>.part` first and renames it only when every row is done.
+If Colab disconnects, rerun the same command with `--resume`; it keeps validated rows and
+never lets a truncated file be scored.
+
+GitHub Actions is CPU-only and intentionally dependency-free: it runs the stdlib tests and
+the report smoke test, not whisper, dataset streaming, or training.
 
 ## data and privacy
 
 Public datasets and our own voice only. Audio is git-ignored and never committed. Nobody
 else is recorded without their permission. The demo processes uploaded audio in memory and
 never stores it. Only cached transcripts and report JSON are shipped in the repo.
+
+`data.py` never fabricates speaker ids: sources without one (FLEURS) are refused unless
+`--allow-clip-level` is passed, and the resulting groups are flagged in `audit.json`.
 
 ## sources and credits
 
