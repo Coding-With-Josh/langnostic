@@ -22,6 +22,7 @@ Nothing here is a finding yet.
 | `speechgap/languages.py` | language names → whisper codes; refuses codes the checkpoint lacks |
 | `speechgap/data.py` | build speaker-disjoint manifests from public datasets (runs where the data is: Colab) |
 | `speechgap/eval.py` | transcribe a manifest with whisper (+ optional adapter), cache the output; Colab T4 or MPS |
+| `speechgap/train.py` | train a rank-8 LoRA adapter on one group, speaker-disjoint from val/test, cached to `checkpoints/` |
 | `speechgap/report.py` | score cached transcripts per group; no model needed |
 | `tests/` | stdlib tests: metrics, manifest contract, split/cap invariants, cache resume |
 | `tests/fixtures/` | a tiny transcript file the report CLI can run against without a model |
@@ -64,6 +65,13 @@ python -m speechgap.data build --out-dir data --naija yoruba:0-0 \
 python -m speechgap.data verify --out-dir data
 python -m speechgap.eval --manifest data/manifest_test.jsonl --device cuda \
     --out results/cache/zero_shot.jsonl
+
+# LoRA: 15 and 30 minutes, then the same scorer with --adapter
+python -m speechgap.train --train data/manifest_train.jsonl \
+    --val data/manifest_val.jsonl --minutes 30 --group yoruba_read --language yo \
+    --out checkpoints/yo-30min
+python -m speechgap.eval --manifest data/manifest_test.jsonl --device cuda \
+    --adapter checkpoints/yo-30min --out results/cache/yo_lora30.jsonl
 ```
 
 A transcription run writes `<out>.part` first and renames it only when every row is done.

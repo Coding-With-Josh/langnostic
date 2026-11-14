@@ -74,10 +74,13 @@ If a hypothesis is not supported we say so.
 
 ## lora protocol (defaults, edit if needed)
 
-- peft LoRA, rank 8, on attention projections of encoder and decoder; encoder-only vs
+- peft LoRA, rank 8, alpha 16, dropout 0.05, on `q_proj` and `v_proj`; encoder-only vs
   decoder-only only if time allows.
 - training audio: 15 and 30 minutes (5 if time), speaker-disjoint from validation and test.
-- early stopping on validation wer; one seed (two if time allows).
+  clips longer than whisper's 30 s window are excluded rather than truncated.
+- optimisation: lr 1e-3, 3 epochs maximum, effective batch 16 (4 x 4), warmup 50 steps,
+  early stopping on validation wer with patience 2, one seed (two if time allows).
+- early stopping uses validation only; each final adapter is evaluated on the test set once.
 - turning the adapter off must reproduce the baseline exactly.
 - forgetting: evaluate every adapter on every other group.
 

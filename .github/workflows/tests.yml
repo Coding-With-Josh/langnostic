@@ -28,6 +28,7 @@ jobs:
           PYTHONPATH=. python tests/test_metrics.py
           PYTHONPATH=. python tests/test_data.py
           PYTHONPATH=. python tests/test_eval.py
+          PYTHONPATH=. python tests/test_train.py
 
       - name: report cli smoke test
         run: PYTHONPATH=. python -m speechgap.report tests/fixtures/tiny_report.jsonl
