@@ -3,7 +3,7 @@
 Input: a jsonl file, one record per clip:
   {"utt_id": "...", "speaker": "...", "group": "yoruba_read", "ref": "...", "hyp": "..."}
 Output: per-group wer / cer with speaker-bootstrap intervals, error mix, hallucination
-rate, wrong-script share, and the five worst clips per group.
+rate, wrong-script share, diacritic retention, and the five worst clips per group.
 
 Usage:
   python -m speechgap.report results/cache/zero_shot.jsonl --out results/zero_shot_report.json
@@ -11,6 +11,7 @@ Usage:
 import argparse
 import json
 import unicodedata
+from collections import Counter
 
 from .metrics import bootstrap_rate, breakdown, is_hallucination, utt_counts
 from .normalize import normalize
@@ -20,6 +21,18 @@ from .normalize import normalize
 # clipped loop is never mistaken for a complete transcript (Phase 3).
 LOOP_CHARS = 200
 LOOP_MARKER = " [loop]"
+
+# Tone marks (grave, acute, circumflex, macron, caron) and the underdot.
+# Precomposed Yoruba letters such as ẹ, ọ and ṣ decompose to a Latin base plus
+# one of these under NFD, so both spellings are compared on equal terms.
+DIACRITIC_MARKS = frozenset({
+    "\u0300",  # combining grave accent
+    "\u0301",  # combining acute accent
+    "\u0302",  # combining circumflex accent
+    "\u0304",  # combining macron
+    "\u030c",  # combining caron
+    "\u0323",  # combining dot below
+})
 
 
 def load_jsonl(path):
@@ -74,6 +87,47 @@ def wrong_script_rate(text):
     return wrong / counted if counted else 0.0
 
 
+def diacritic_marks(text):
+    """Count tone marks and underdots attached to Latin base letters.
+
+    NFD splits precomposed letters (ẹ, ọ́, à) into a base plus marks. A mark is
+    counted only while the preceding base is Latin (Phase 3): a Greek or Khmer
+    loop must not "retain" Yoruba diacritics by reusing U+0301 or U+0323 on a
+    non-Latin base. Returns a Counter keyed by the combining character.
+    """
+    counts = Counter()
+    latin_base = False
+    for ch in unicodedata.normalize("NFD", text):
+        if unicodedata.category(ch).startswith("M"):
+            if latin_base and ch in DIACRITIC_MARKS:
+                counts[ch] += 1
+            continue
+        latin_base = unicodedata.name(ch, "").startswith("LATIN")
+    return counts
+
+
+def diacritic_retention(refs, hyps):
+    """Share of the reference's tone marks/underdots that survive in the output.
+
+    Multiset recall over mark characters: for each mark, keep the smaller of
+    its reference and hypothesis counts. Hypothesis marks beyond the reference
+    cannot push the score above 1.0, and a loop cannot inflate it by repetition.
+    Returns None when the references carry no such marks (an English group has
+    no defined retention), never 0.0 or 1.0, so that group cannot look failed or
+    perfect by accident. Text is compared raw (NFC or NFD); normalisation by the
+    caller would erase exactly what this metric measures.
+    """
+    ref_counts, hyp_counts = Counter(), Counter()
+    for ref, hyp in zip(refs, hyps):
+        ref_counts.update(diacritic_marks(ref))
+        hyp_counts.update(diacritic_marks(hyp))
+    total = sum(ref_counts.values())
+    if total == 0:
+        return None
+    kept = sum(min(n, hyp_counts.get(mark, 0)) for mark, n in ref_counts.items())
+    return kept / total
+
+
 def worst_examples(records, group, k=5, limit=LOOP_CHARS):
     """The k highest per-clip WER rows in one group; ties broken by utt_id.
 
@@ -109,21 +163,29 @@ def score(records, strip_diacritics=False, n_boot=2000, seed=0):
             "wer_error_mix": breakdown(wc),
             "hallucination_rate": sum(is_hallucination(a, b) for a, b in zip(refs, hyps)) / len(rows),
             "wrong_script_rate": wrong_script_rate(" ".join(hyps)),
+            # Raw text, not the normalised forms above: lowercasing and
+            # punctuation stripping are scoring choices, while this column asks
+            # whether the tone marks themselves survived.
+            "diacritic_retention": diacritic_retention(
+                [r["ref"] for r in rows], [r["hyp"] for r in rows]
+            ),
         }
     return out
 
 
 def to_markdown(report, worst=None):
-    lines = ["| group | clips | speakers | wer [95% ci] | cer [95% ci] | insertions share | halluc. | wrong script |",
-             "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    lines = ["| group | clips | speakers | wer [95% ci] | cer [95% ci] | insertions share | halluc. | wrong script | diacritic retention |",
+             "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for g, m in report.items():
         w, c = m["wer"], m["cer"]
+        retention = m["diacritic_retention"]
+        retention_cell = "n/a" if retention is None else f"{retention:.1%}"
         lines.append(
             f"| {g} | {m['n_clips']} | {w['n_speakers']} | "
             f"{w['rate']:.1%} [{w['lo']:.1%}, {w['hi']:.1%}] | "
             f"{c['rate']:.1%} [{c['lo']:.1%}, {c['hi']:.1%}] | "
             f"{m['wer_error_mix']['ins']:.0%} | {m['hallucination_rate']:.0%} | "
-            f"{m['wrong_script_rate']:.1%} |"
+            f"{m['wrong_script_rate']:.1%} | {retention_cell} |"
         )
     for g in sorted(worst or {}):
         rows = worst[g]
