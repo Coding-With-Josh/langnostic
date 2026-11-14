@@ -116,7 +116,7 @@ def test_lora_config_does_not_use_the_seq2seq_wrapper():
     # A generic PeftModel (task_type=None) forwards input_features untouched.
     cfg = build_lora_config()
     assert cfg.task_type is None
-    assert tuple(cfg.target_modules) == ("q_proj", "v_proj")
+    assert set(cfg.target_modules) == {"q_proj", "v_proj"}
     assert (cfg.r, cfg.lora_alpha, cfg.lora_dropout) == (8, 16, 0.05)
 
 
