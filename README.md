@@ -44,24 +44,25 @@ PYTHONPATH=. python tests/test_eval.py
 PYTHONPATH=. python -m speechgap.report tests/fixtures/tiny_report.jsonl
 
 PYTHONPATH=. python -m speechgap.data build --dry-run \
-    --naija yoruba:0-0 --voxpopuli en_accented:test en:test
+    --naija yoruba:0-0 --voxpopuli en:test --l2arctic \
+    --fleurs yo_ng:test --allow-clip-level
 ```
 
 ## compute
 
-All model work happens in a free **Colab T4** (Kaggle T4 as backup): dataset streaming,
-whisper transcription, and LoRA training. The laptop only runs tests, scores cached JSONL,
-and develops the Gradio demo. `speechgap.eval --device cuda` refuses to fall back silently
-if CUDA is absent.
+All model work happens in a free **Colab T4** (Kaggle T4 as backup): dataset download and
+decode, whisper transcription, and LoRA training. The laptop only runs tests, scores cached
+JSONL, and develops the Gradio demo. `speechgap.eval --device cuda` refuses to fall back
+silently if CUDA is absent.
 
 The cache is the only artifact that comes back from Colab: `results/cache/*.jsonl` plus its
 `.meta.json` sidecar. Audio and manifests stay in the Colab session (or Drive); they are
 regenerable and git-ignored.
 
 ```bash
-# inside Colab, from the repo root
+# inside Colab, from the repo root (about 2.6 GB of pinned parquet)
 python -m speechgap.data build --out-dir data --naija yoruba:0-0 \
-    --voxpopuli en_accented:test en:test --accents en_nl,en_de,en_cs
+    --voxpopuli en:test --l2arctic --fleurs yo_ng:test --allow-clip-level
 python -m speechgap.data verify --out-dir data
 python -m speechgap.eval --manifest data/manifest_test.jsonl --device cuda \
     --out results/cache/zero_shot.jsonl
