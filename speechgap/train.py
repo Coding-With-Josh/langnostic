@@ -196,6 +196,7 @@ def _dataset_classes(processor):
 
 
 def _trainer_class():
+    import torch
     from transformers import Seq2SeqTrainer
 
     class LanguageForcedTrainer(Seq2SeqTrainer):
@@ -205,6 +206,17 @@ def _trainer_class():
             super().__init__(*a, **kw)
             self._force_language = language
             self._force_task = task
+
+        def training_step(self, model, inputs, num_items_in_batch=None):
+            # Phase 3/Phase 2: a non-finite loss means the fp16 run has diverged;
+            # publishing that adapter would be worse than failing the run.
+            loss = super().training_step(model, inputs, num_items_in_batch=num_items_in_batch)
+            if isinstance(loss, torch.Tensor) and not torch.isfinite(loss).all():
+                raise RuntimeError(
+                    "non-finite training loss; refusing to continue (retry with --fp32 "
+                    "or a smaller --batch-size)"
+                )
+            return loss
 
         def prediction_step(self, model, inputs, prediction_loss_only,
                             ignore_keys=None, **gen_kwargs):
