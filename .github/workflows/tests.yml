@@ -1,0 +1,29 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+# Read-only: the workflow never needs to write to the repo or read secrets.
+permissions:
+  contents: read
+
+jobs:
+  metrics:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # metrics/report use only the standard library, so CI needs no pip install.
+      - name: metrics tests
+        run: PYTHONPATH=. python tests/test_metrics.py
+
+      - name: report cli smoke test
+        run: PYTHONPATH=. python -m speechgap.report tests/fixtures/tiny_report.jsonl

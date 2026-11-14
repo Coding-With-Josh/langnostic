@@ -1,0 +1,40 @@
+# Audio and local data: recordings and datasets never enter history.
+# data/ stays local; only the placeholder is tracked.
+data/*
+!data/.gitkeep
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.ogg
+*.opus
+*.webm
+
+# Model artifacts: keep adapters on the HF Hub or a release, not in git.
+checkpoints/
+*.safetensors
+*.ckpt
+*.pt
+*.bin
+
+# Secrets.
+.env
+.env.*
+*.pem
+hf_token*
+token.json
+
+# Python.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# macOS and notebooks.
+.DS_Store
+.ipynb_checkpoints/
+*.log

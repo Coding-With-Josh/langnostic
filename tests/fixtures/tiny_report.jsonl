@@ -1,0 +1,6 @@
+{"utt_id": "en1", "speaker": "spk_a", "group": "english_read", "ref": "the quick brown fox", "hyp": "the quick brown fox"}
+{"utt_id": "en2", "speaker": "spk_a", "group": "english_read", "ref": "jumps over the lazy dog", "hyp": "jumps over a lazy dog"}
+{"utt_id": "en3", "speaker": "spk_b", "group": "english_read", "ref": "hello world", "hyp": "hello world"}
+{"utt_id": "yo1", "speaker": "spk_c", "group": "yoruba_read", "ref": "bawo ni o se wa", "hyp": "bawo ni se wa"}
+{"utt_id": "yo2", "speaker": "spk_c", "group": "yoruba_read", "ref": "mo n ka iwe", "hyp": "mo n ka iwe"}
+{"utt_id": "yo3", "speaker": "spk_d", "group": "yoruba_read", "ref": "ese pupa", "hyp": "ese pupa pupa"}

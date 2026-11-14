@@ -1,0 +1,14 @@
+# apple silicon: install torch (pip install torch) and ffmpeg (brew install ffmpeg) first,
+# then: pip install -r requirements.txt
+transformers
+datasets
+accelerate
+peft
+jiwer
+soundfile
+librosa
+pandas
+matplotlib
+gradio
+huggingface_hub
+pytest
