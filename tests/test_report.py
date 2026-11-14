@@ -1,6 +1,6 @@
 """Stdlib-only tests for the worst-example section of the report."""
 from speechgap.report import (LOOP_CHARS, LOOP_MARKER, score, to_markdown,
-                              truncate_hyp, worst_examples)
+                              truncate_hyp, worst_examples, wrong_script_rate)
 
 
 def _rec(uid, group="g", ref="one two three", hyp="one two three"):
@@ -58,6 +58,34 @@ def test_markdown_shows_five_worst_per_group():
     rows = [l for l in body.splitlines() if l.startswith("| u") and "utt_id" not in l]
     assert len(rows) == 5
     assert "[loop]" in body
+
+
+def test_wrong_script_khmer_is_one():
+    assert wrong_script_rate("កខគ") == 1.0
+
+
+def test_wrong_script_yoruba_underdots_is_zero():
+    assert wrong_script_rate("ẹ̀yà ọ̀nà ṣe") == 0.0
+    assert wrong_script_rate("Àwọn èyàn ti mọ̀ nípa ọ̀nà") == 0.0
+
+
+def test_wrong_script_english_is_zero():
+    assert wrong_script_rate("hello world") == 0.0
+
+
+def test_wrong_script_mixed_counts_only_script_bearing_chars():
+    # 123, punctuation and space carry no script; one Khmer letter of two counts.
+    assert wrong_script_rate("a ក 123 !?") == 0.5
+    assert wrong_script_rate("") == 0.0
+    assert wrong_script_rate("42 --") == 0.0
+
+
+def test_summary_table_has_wrong_script_column():
+    recs = [_rec("x", hyp="កខគ")]
+    md = to_markdown(score(recs, n_boot=50))
+    assert md.splitlines()[0].rstrip().endswith("wrong script |")
+    row = [l for l in md.splitlines() if l.startswith("| g |")][0]
+    assert row.rstrip().endswith("100.0% |")
 
 
 if __name__ == "__main__":  # run without pytest: python tests/test_report.py

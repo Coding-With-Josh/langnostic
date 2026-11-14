@@ -3,13 +3,14 @@
 Input: a jsonl file, one record per clip:
   {"utt_id": "...", "speaker": "...", "group": "yoruba_read", "ref": "...", "hyp": "..."}
 Output: per-group wer / cer with speaker-bootstrap intervals, error mix, hallucination
-rate, and the five worst clips per group.
+rate, wrong-script share, and the five worst clips per group.
 
 Usage:
   python -m speechgap.report results/cache/zero_shot.jsonl --out results/zero_shot_report.json
 """
 import argparse
 import json
+import unicodedata
 
 from .metrics import bootstrap_rate, breakdown, is_hallucination, utt_counts
 from .normalize import normalize
@@ -51,6 +52,28 @@ def per_clip_wer(rec):
     return (counts["s"] + counts["d"] + counts["i"]) / max(counts["n"], 1)
 
 
+def wrong_script_rate(text):
+    """Share of script-bearing characters outside Latin / Latin-Extended.
+
+    Only letters and marks are counted: spaces, digits and punctuation carry no
+    script and would otherwise dilute the rate. A character with no Unicode
+    name counts as wrong — unknown output is never silently treated as Latin.
+    Latin-based modifier letters (Phonetic Extensions) are not in the named
+    Latin ranges and count as wrong too; the rule is deliberately conservative.
+    """
+    counted = wrong = 0
+    for ch in text:
+        category = unicodedata.category(ch)
+        if not (category.startswith("L") or category.startswith("M")):
+            continue
+        counted += 1
+        if category.startswith("M"):
+            continue  # combining marks belong to the base letter's script
+        if not unicodedata.name(ch, "").startswith("LATIN"):
+            wrong += 1
+    return wrong / counted if counted else 0.0
+
+
 def worst_examples(records, group, k=5, limit=LOOP_CHARS):
     """The k highest per-clip WER rows in one group; ties broken by utt_id.
 
@@ -85,20 +108,22 @@ def score(records, strip_diacritics=False, n_boot=2000, seed=0):
             "cer": bootstrap_rate(cc, speakers, n_boot=n_boot, seed=seed),
             "wer_error_mix": breakdown(wc),
             "hallucination_rate": sum(is_hallucination(a, b) for a, b in zip(refs, hyps)) / len(rows),
+            "wrong_script_rate": wrong_script_rate(" ".join(hyps)),
         }
     return out
 
 
 def to_markdown(report, worst=None):
-    lines = ["| group | clips | speakers | wer [95% ci] | cer [95% ci] | insertions share | halluc. |",
-             "| --- | --- | --- | --- | --- | --- | --- |"]
+    lines = ["| group | clips | speakers | wer [95% ci] | cer [95% ci] | insertions share | halluc. | wrong script |",
+             "| --- | --- | --- | --- | --- | --- | --- | --- |"]
     for g, m in report.items():
         w, c = m["wer"], m["cer"]
         lines.append(
             f"| {g} | {m['n_clips']} | {w['n_speakers']} | "
             f"{w['rate']:.1%} [{w['lo']:.1%}, {w['hi']:.1%}] | "
             f"{c['rate']:.1%} [{c['lo']:.1%}, {c['hi']:.1%}] | "
-            f"{m['wer_error_mix']['ins']:.0%} | {m['hallucination_rate']:.0%} |"
+            f"{m['wer_error_mix']['ins']:.0%} | {m['hallucination_rate']:.0%} | "
+            f"{m['wrong_script_rate']:.1%} |"
         )
     for g in sorted(worst or {}):
         rows = worst[g]
