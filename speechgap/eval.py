@@ -117,16 +117,23 @@ def supported_languages(pipe):
         raw = getattr(gen, "lang_to_id", None)
     if not raw:
         tok = getattr(pipe, "tokenizer", None)
-        raw = getattr(tok, "lang_code_to_id", None)
-    if not raw:
+        raw = getattr(tok, "lang_code_to_id", None) or getattr(tok, "lang_to_id", None)
+    if raw:
+        codes = set()
+        for key in raw:
+            k = str(key)
+            if k.startswith("<|") and k.endswith("|>"):
+                k = k[2:-2]
+            codes.add(k)
+        return codes or None
+    # transformers 5.x drops lang_to_id from WhisperConfig; the package's own
+    # code->name table is the same 99-language set the checkpoint was trained on.
+    try:
+        from transformers.models.whisper.tokenization_whisper import LANGUAGES
+
+        return set(LANGUAGES) or None
+    except Exception:  # pragma: no cover - transformers internal move
         return None
-    codes = set()
-    for key in raw:
-        k = str(key)
-        if k.startswith("<|") and k.endswith("|>"):
-            k = k[2:-2]
-        codes.add(k)
-    return codes or None
 
 
 def _read_partial(part_path, valid_ids):
@@ -247,8 +254,13 @@ def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
     if adapter:
         from peft import PeftModel
 
-        pipe.model = PeftModel.from_pretrained(pipe.model, adapter).merge_and_unload()
-        # PeftModel loads on CPU; move the merged model back before inference.
+        peft_model = PeftModel.from_pretrained(pipe.model, adapter)
+        try:
+            pipe.model = peft_model.merge_and_unload()
+        except (AttributeError, NotImplementedError):
+            # peft 0.21's base PeftModel has no merge; inference works in place.
+            pipe.model = peft_model
+        # PeftModel loads on CPU; move the merged/adapted model back before inference.
         pipe.model.to(dev)
         pipe.model.eval()
 

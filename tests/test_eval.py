@@ -85,6 +85,19 @@ def test_resume_refuses_a_partial_from_another_manifest():
             raise AssertionError("foreign partial must be refused")
 
 
+def test_supported_languages_strips_whisper_tokens():
+    from types import SimpleNamespace
+
+    from speechgap.eval import supported_languages
+
+    pipe = SimpleNamespace(
+        model=SimpleNamespace(generation_config=SimpleNamespace(
+            lang_to_id={"<|en|>": 1, "<|yo|>": 2})),
+        tokenizer=None,
+    )
+    assert supported_languages(pipe) == {"en", "yo"}
+
+
 def test_report_refuses_a_partial_cache():
     from speechgap.report import load_jsonl
 
