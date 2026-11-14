@@ -2,8 +2,12 @@
 import os
 import tempfile
 
-from speechgap.train import (cap_rows, check_disjoint, check_homogeneous,
-                             probe_durations, select_clips)
+from speechgap.train import (GenerateGuard, assert_language_kwargs, cap_rows,
+                             check_disjoint, check_homogeneous,
+                             degenerate_reasons, example_lines,
+                             force_generation_kwargs, pilot_gates,
+                             probe_durations, prompt_language_check,
+                             select_clips)
 
 
 def _row(i, speaker="s0", group="yoruba_read", lang="yoruba"):
@@ -82,6 +86,140 @@ def test_probe_durations_rejects_missing_and_non_16k():
             assert "16 kHz" in str(e)
         else:
             raise AssertionError("non-16k audio must be refused")
+
+
+def test_assert_language_kwargs_accepts_code_and_token_forms():
+    assert_language_kwargs({"language": "yo", "task": "transcribe"}, "yo", "transcribe")
+    assert_language_kwargs({"language": "<|yo|>", "task": "transcribe"}, "yo", "transcribe")
+
+
+def test_assert_language_kwargs_rejects_every_unforced_call():
+    bad = [
+        {"task": "transcribe"},                    # language omitted -> auto-detect
+        {"language": None, "task": "transcribe"},  # explicit auto-detect
+        {"language": "en", "task": "transcribe"},  # wrong language
+        {"language": "yo"},                        # task omitted
+        {"language": "yo", "task": "translate"},   # wrong task
+    ]
+    for kwargs in bad:
+        try:
+            assert_language_kwargs(kwargs, "yo", "transcribe")
+        except ValueError:
+            continue
+        raise AssertionError(f"must refuse {kwargs}")
+
+
+def test_force_generation_kwargs_installs_and_survives_the_trainer_rebuild():
+    # evaluate() rebuilds _gen_kwargs from scratch on every call, so the helper
+    # must be idempotent and safe on a dict that is already forced.
+    gen = {}
+    assert force_generation_kwargs(gen, "yo", "transcribe") is gen
+    assert gen == {"language": "yo", "task": "transcribe"}
+    force_generation_kwargs(gen, "yo", "transcribe")
+    assert gen == {"language": "yo", "task": "transcribe"}
+    force_generation_kwargs({"language": "<|yo|>", "task": "transcribe"}, "yo", "transcribe")
+
+
+def test_force_generation_kwargs_refuses_conflicts_instead_of_overwriting():
+    for gen, needle in [
+        ({"language": "en", "task": "transcribe"}, "language"),
+        ({"language": "yo", "task": "translate"}, "task"),
+    ]:
+        try:
+            force_generation_kwargs(gen, "yo", "transcribe")
+        except ValueError as e:
+            assert needle in str(e)
+        else:
+            raise AssertionError(f"must refuse {gen}")
+
+
+def test_degenerate_reasons_flags_structure_not_badness():
+    refs = ["bawo ni", "mo wa", "o dabo", "e kaaro", "kini"]
+    assert degenerate_reasons(refs, list(refs)) == []
+    # Bad but real output is the WER gate's job, not this one.
+    assert degenerate_reasons(refs, ["", "mo wa", "o dabo", "e kaaro", "kini"]) == []
+    assert "empty" in " ".join(degenerate_reasons(refs, [""] * 5))
+    assert "identical" in " ".join(degenerate_reasons(refs, ["bawo"] * 5))
+    collapsed = ["a", "b"] * 10
+    assert "distinct" in " ".join(degenerate_reasons(["x"] * 20, collapsed))
+    loop = "bawo ni " * 40  # 320 chars against 8-char references
+    assert "loops" in " ".join(
+        degenerate_reasons(refs, [loop + str(i) for i in range(5)])
+    )
+
+
+def test_pilot_gates_pass_on_a_clean_run():
+    refs = ["bawo ni", "mo wa", "o dabo"]
+    gates = pilot_gates(refs, list(refs))
+    assert gates["ok"] and gates["val_wer"] == 0.0 and gates["failures"] == []
+
+
+def test_pilot_gates_fail_above_100_percent_wer():
+    gates = pilot_gates(["one"], ["x y z"])  # 3 insertions for 1 reference word
+    assert not gates["ok"] and "val wer" in " ".join(gates["failures"])
+
+
+def test_pilot_gates_fail_on_wrong_script_without_calling_it_degenerate():
+    refs = ["one two three four five six seven eight"] * 5
+    hyps = ["កខគ", "ខគក", "គកខ", "កគខ", "ខកគ"]  # 2 tokens each, 1/4 wer
+    gates = pilot_gates(refs, hyps)
+    assert not gates["ok"]
+    assert "wrong script" in " ".join(gates["failures"])
+    assert gates["degenerate"] == []
+
+
+def test_example_lines_cap_at_three_and_mark_loops():
+    refs = ["a", "b", "c", "d"]
+    hyps = ["a", "b", "c", "x" * 5000]
+    lines = example_lines(refs, hyps, ["u0", "u1", "u2", "u3"])
+    assert len(lines) == 3 and lines[0].startswith("[u0]")
+    long_lines = example_lines(refs, hyps, k=4)
+    assert "[loop]" in long_lines[-1] and len(long_lines[-1]) < 5000
+
+
+class _FakeModel:
+    def __init__(self, sequences):
+        self.sequences = sequences
+        self.seen = []
+
+    def generate(self, **kwargs):
+        self.seen.append(kwargs)
+        return self.sequences
+
+
+def test_generate_guard_requires_the_forced_kwargs():
+    model = _FakeModel([[50258, 50325, 50359, 42]])
+    guard = GenerateGuard(model, "yo", "transcribe", decoder_start_id=50258,
+                          language_id=50325, task_id=50359).install(model)
+    model.generate(language="yo", task="transcribe")
+    assert guard.calls == 1 and guard.prompt_verified
+    try:
+        model.generate(task="transcribe")  # auto-detect path
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("an unforced generate must be refused")
+
+
+def test_generate_guard_rejects_a_prompt_with_the_wrong_language_token():
+    model = _FakeModel([[50258, 50259, 50359, 42]])  # <|en|>, not <|yo|>
+    GenerateGuard(model, "yo", "transcribe", decoder_start_id=50258,
+                  language_id=50325, task_id=50359).install(model)
+    try:
+        model.generate(language="yo", task="transcribe")
+    except RuntimeError as e:
+        assert "did not take effect" in str(e)
+    else:
+        raise AssertionError("a prompt without <|yo|> must be refused")
+
+
+def test_generate_guard_records_an_unobservable_prompt_without_passing_it():
+    model = _FakeModel([[42, 43]])  # prompt stripped by this version
+    guard = GenerateGuard(model, "yo", "transcribe", decoder_start_id=50258,
+                          language_id=50325, task_id=50359).install(model)
+    model.generate(language="yo", task="transcribe")
+    assert guard.calls == 1
+    assert not guard.prompt_observable and not guard.prompt_verified
 
 
 if __name__ == "__main__":

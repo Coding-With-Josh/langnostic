@@ -9,7 +9,10 @@ What this file refuses to do, on purpose:
   * train on a manifest that mixes groups or languages;
   * call a run "30 minutes" when the manifest cannot supply 30 minutes;
   * overwrite an existing adapter without ``--force``;
-  * publish a half-written adapter after a disconnect.
+  * publish a half-written adapter after a disconnect;
+  * publish an adapter whose validation output is degenerate, above 100% WER,
+    or written in the wrong script (the pilot gates, below);
+  * score a run whose ``generate()`` call did not receive the forced language.
 
 Usage (Colab):
   python -m speechgap.train --train data/manifest_train.jsonl \
@@ -18,6 +21,11 @@ Usage (Colab):
 
   # pre-flight without a GPU or model download
   python -m speechgap.train ... --dry-run
+
+  # pilot: 2 minutes of audio, one epoch, 20 validation clips
+  python -m speechgap.train --train data/manifest_train.jsonl \
+      --val data/manifest_val.jsonl --minutes 2 --epochs 1 --max-val 20 \
+      --patience 1 --out checkpoints/yo-pilot --group yoruba_read --language yo
 
   # evaluate the adapter with the same scorer as the baseline
   python -m speechgap.eval --manifest data/manifest_test.jsonl --device cuda \
@@ -37,9 +45,21 @@ from .eval import (DEFAULT_MODEL, DEFAULT_REVISION, load_manifest,
 from .languages import resolve_language
 from .metrics import rate, utt_counts
 from .normalize import normalize
+from .report import diacritic_retention, truncate_hyp, wrong_script_rate
 
 # Fixed analysis-plan defaults. Changing these is a deviations-log change.
 LORA_TARGETS = ("q_proj", "v_proj")
+
+# Pilot pass conditions (ANALYSIS_PLAN.md). A run that misses any of them
+# publishes nothing, so its number can never be quoted as an adapter result.
+PILOT_MAX_VAL_WER = 1.0
+PILOT_MAX_WRONG_SCRIPT = 0.10
+PILOT_EXAMPLES = 3
+
+# A token loop is not "bad ASR", it is a score that stops meaning anything:
+# WER fills up with insertions. Ten times the reference length is far outside
+# anything observed in a healthy run, including the 367% WER yoruba baseline.
+LOOP_RATIO = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +162,210 @@ def wer_of(refs, hyps):
     return rate(counts)
 
 
+def degenerate_reasons(refs, hyps):
+    """Why these hypotheses cannot support a WER claim (empty list = usable).
+
+    Four structural failures, each seen in whisper runs:
+      * nothing decoded at all;
+      * a collapse to one string (a 2-minute adapter can memorize one line);
+      * a collapse to a handful of strings across the whole set;
+      * token loops, which inflate WER with insertions instead of measuring ASR.
+
+    Thresholds are deliberately loose: this gate asks "is the score meaningless",
+    not "is the score bad". A bad-but-real transcript passes here and is caught
+    by the WER and wrong-script gates instead, so a weak pilot is still reported
+    honestly rather than being misfiled as a broken run.
+    """
+    if not hyps:
+        return ["no hypotheses"]
+    n = len(hyps)
+    reasons = []
+    empty = sum(1 for h in hyps if not h.strip())
+    if empty == n:
+        reasons.append("every hypothesis is empty")
+    elif empty * 2 >= n:
+        reasons.append(f"{empty}/{n} hypotheses are empty")
+    distinct = len(set(hyps))
+    if n >= 2 and distinct == 1:
+        reasons.append("every hypothesis is identical")
+    elif n >= 5 and distinct * 5 < n:
+        reasons.append(f"only {distinct}/{n} distinct hypotheses")
+    loops = sum(
+        1 for h, r in zip(hyps, refs) if len(h) > LOOP_RATIO * max(len(r), 1)
+    )
+    if loops * 2 >= n:
+        reasons.append(
+            f"{loops}/{n} hypotheses exceed {LOOP_RATIO:.0f}x their reference (loops)"
+        )
+    return reasons
+
+
+def pilot_gates(refs, hyps):
+    """Evaluate the pilot gates. Never raises: the caller prints, then decides.
+
+    Measured on raw text, exactly as ``speechgap.report`` measures them. WER is
+    normalised inside ``wer_of``; the script and diacritic columns are not, so
+    lowercasing or stripping punctuation cannot make the output look better than
+    the cache a reviewer would score later.
+    """
+    if not refs or len(refs) != len(hyps):
+        raise ValueError(
+            f"gate inputs must be parallel and non-empty; got {len(refs)} refs, "
+            f"{len(hyps)} hypotheses"
+        )
+    val_wer = wer_of(refs, hyps)
+    wrong_script = wrong_script_rate(" ".join(hyps))
+    reasons = degenerate_reasons(refs, hyps)
+    failures = list(reasons)
+    if val_wer > PILOT_MAX_VAL_WER:
+        failures.append(f"val wer {val_wer:.1%} > {PILOT_MAX_VAL_WER:.0%}")
+    if wrong_script > PILOT_MAX_WRONG_SCRIPT:
+        failures.append(
+            f"wrong script {wrong_script:.1%} > {PILOT_MAX_WRONG_SCRIPT:.0%}"
+        )
+    return {
+        "n_clips": len(hyps),
+        "val_wer": val_wer,
+        "wrong_script_rate": wrong_script,
+        "diacritic_retention": diacritic_retention(refs, hyps),
+        "degenerate": reasons,
+        "failures": failures,
+        "ok": not failures,
+    }
+
+
+def force_generation_kwargs(gen, language, task):
+    """Force ``language``/``task`` into a generation-kwargs dict, in place.
+
+    A conflicting value is an error, not something to overwrite: the caller
+    asked for one language and the harness is about to generate in another. This
+    is where the value is installed; ``assert_language_kwargs`` is what proves it
+    survived all the way to ``generate()``.
+    """
+    current = gen.get("language")
+    if current not in (None, language, f"<|{language}|>"):
+        raise ValueError(
+            f"generation language {current!r} conflicts with the forced {language!r}"
+        )
+    current_task = gen.get("task")
+    if current_task not in (None, task):
+        raise ValueError(
+            f"generation task {current_task!r} conflicts with the forced {task!r}"
+        )
+    gen["language"] = language
+    gen["task"] = task
+    return gen
+
+
+def assert_language_kwargs(kwargs, language, task):
+    """Prove the forced language and task are present at the ``generate()`` call.
+
+    Threat (Phase 3): whisper auto-detects when it is not told otherwise, so a
+    missing kwarg silently turns the run into a different experiment, and the
+    validation WER stops describing the adapter that ``speechgap.eval`` scores.
+    This raises instead of logging, because there is no safe default: guessing
+    is exactly the failure mode being measured.
+    """
+    value = kwargs.get("language")
+    if value not in (language, f"<|{language}|>"):
+        raise ValueError(
+            f"generate() received language={value!r}, expected {language!r}; "
+            "refusing to score an unforced run"
+        )
+    got_task = kwargs.get("task")
+    if got_task != task:
+        raise ValueError(
+            f"generate() received task={got_task!r}, expected {task!r}; "
+            "refusing to score an unforced run"
+        )
+
+
+def prompt_language_check(sequences, decoder_start_id, language_id, task_id):
+    """Is the forced prompt visible in the returned decoder sequence?
+
+    True: the sequence starts with ``<|startoftranscript|><|lang|><|task|>``.
+    False: the prompt is present but the language/task tokens are not ours.
+    None: the prompt was stripped by this transformers version, so the call
+    cannot be judged from its output. ``None`` is recorded, never treated as
+    a pass -- the kwarg assertion above remains the control in that case.
+    """
+    if not sequences or not isinstance(sequences[0], list):
+        return None
+    first = sequences[0]
+    if first[:1] != [decoder_start_id]:
+        return None
+    if len(first) < 3:
+        return False
+    return first[1] == language_id and first[2] == task_id
+
+
+class GenerateGuard:
+    """Wrap ``model.generate`` so every call proves it was language-forced."""
+
+    def __init__(self, model, language, task, decoder_start_id=None,
+                 language_id=None, task_id=None):
+        self.language = language
+        self.task = task
+        self.decoder_start_id = decoder_start_id
+        self.language_id = language_id
+        self.task_id = task_id
+        self.calls = 0
+        self.prompt_verified = False
+        self.prompt_observable = False
+        self._original = model.generate
+        self.checked = self._make_checked()
+
+    def _make_checked(self):
+        def checked(*args, **kwargs):
+            assert_language_kwargs(kwargs, self.language, self.task)
+            self.calls += 1
+            out = self._original(*args, **kwargs)
+            if self.language_id is not None and self.task_id is not None:
+                sequences = getattr(out, "sequences", out)
+                if hasattr(sequences, "tolist"):
+                    sequences = sequences.tolist()
+                verdict = prompt_language_check(
+                    sequences, self.decoder_start_id, self.language_id, self.task_id
+                )
+                if verdict is False:
+                    # Phase 2: a kwarg that reached generate but did not reach
+                    # the decoder prompt is the same silent experiment change.
+                    raise RuntimeError(
+                        f"generate() returned a prompt without <|{self.language}|>"
+                        f"/<|{self.task}|>; the language kwarg did not take effect"
+                    )
+                if verdict is not None:
+                    self.prompt_observable = True
+                    self.prompt_verified = self.prompt_verified or verdict
+            return out
+
+        return checked
+
+    def install(self, model):
+        # Set on the instance: PeftModel forwards unknown attributes to the base
+        # model, and prediction_step reads ``model.generate`` at call time.
+        model.generate = self.checked
+        return self
+
+    def report(self):
+        return {
+            "language": self.language,
+            "task": self.task,
+            "generate_calls": self.calls,
+            "prompt_tokens_observable": self.prompt_observable,
+            "prompt_tokens_verified": self.prompt_verified,
+        }
+
+
+def example_lines(refs, hyps, utt_ids=None, k=PILOT_EXAMPLES):
+    """The ref/hyp pairs a human has to read before trusting any number."""
+    lines = []
+    for i in range(min(k, len(refs), len(hyps))):
+        uid = utt_ids[i] if utt_ids and i < len(utt_ids) else str(i)
+        lines.append(f"[{uid}]\n  ref: {refs[i]}\n  hyp: {truncate_hyp(hyps[i])}")
+    return lines
+
+
 # ---------------------------------------------------------------------------
 # training
 # ---------------------------------------------------------------------------
@@ -218,13 +442,25 @@ def _trainer_class():
                 )
             return loss
 
+        def _force_gen_kwargs(self):
+            """Put the forced language/task where prediction_step reads them.
+
+            transformers 5.x accepts extra kwargs in ``prediction_step`` but 4.x
+            does not, so the supported path is ``self._gen_kwargs`` -- the same
+            dict the trainer copies into ``generate()``. ``evaluate()`` rebuilds
+            that dict on every call, hence this runs per call, not once in
+            ``__init__``. If a future version renames the attribute, this becomes
+            a no-op and the generate guard is what refuses the unforced call.
+            """
+            if not isinstance(getattr(self, "_gen_kwargs", None), dict):
+                self._gen_kwargs = {}
+            force_generation_kwargs(
+                self._gen_kwargs, self._force_language, self._force_task
+            )
+
         def prediction_step(self, model, inputs, prediction_loss_only,
                             ignore_keys=None, **gen_kwargs):
-            if not gen_kwargs and hasattr(self, "_gen_kwargs"):
-                gen_kwargs = self._gen_kwargs.copy()
-            if self._force_language:
-                gen_kwargs.setdefault("language", self._force_language)
-                gen_kwargs.setdefault("task", self._force_task)
+            self._force_gen_kwargs()
             return super().prediction_step(
                 model, inputs, prediction_loss_only, ignore_keys=ignore_keys, **gen_kwargs
             )
@@ -339,6 +575,33 @@ def train(args):
 
     tokenizer = processor.tokenizer
 
+    # Resolve the prompt ids from the tokenizer, not from generation_config:
+    # transformers 5.x drops lang_to_id, and convert_tokens_to_ids is stable.
+    # An unknown id means this checkpoint cannot express the language we need,
+    # so refuse before training rather than let whisper auto-detect.
+    language_token_id = tokenizer.convert_tokens_to_ids(f"<|{language_code}|>")
+    task_token_id = tokenizer.convert_tokens_to_ids("<|transcribe|>")
+    unk = tokenizer.unk_token_id
+    if language_token_id in (None, unk) or task_token_id in (None, unk):
+        raise SystemExit(
+            f"{args.model} has no <|{language_code}|>/<|transcribe|> token "
+            f"(ids {language_token_id}/{task_token_id}); cannot force the language"
+        )
+    decoder_start_id = getattr(base.generation_config, "decoder_start_token_id", None)
+
+    def new_guard(target):
+        # Phase 3: load_best_model_at_end may hand back a different model object,
+        # so the guard is rebuilt on whatever the trainer will actually call.
+        return GenerateGuard(
+            target, language_code, "transcribe",
+            decoder_start_id=decoder_start_id,
+            language_id=language_token_id,
+            task_id=task_token_id,
+        ).install(target)
+
+    guard = new_guard(model)
+    last_eval = {}
+
     def compute_metrics(pred):
         pred_ids = pred.predictions
         if isinstance(pred_ids, tuple):
@@ -347,6 +610,9 @@ def train(args):
         label_ids[label_ids == -100] = tokenizer.pad_token_id
         hyp = tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
         ref = tokenizer.batch_decode(label_ids, skip_special_tokens=True)
+        # Keep the raw strings: the gates measure the script and the diacritics,
+        # which normalisation for WER would erase.
+        last_eval["ref"], last_eval["hyp"] = ref, hyp
         refs = [normalize(x) for x in ref]
         hyps = [normalize(x) for x in hyp]
         counts_w = [utt_counts(a, b, "word") for a, b in zip(refs, hyps)]
@@ -399,7 +665,36 @@ def train(args):
 
     try:
         trainer.train()
-        model.save_pretrained(adapter_tmp)
+        # Phase 3: the guard must be on the object the final evaluation calls.
+        # If load_best_model_at_end swapped it, the old wrapper is gone and the
+        # assertion would be vacuous; rebuilding closes that and re-covers the
+        # published weights rather than the last epoch's.
+        guard = new_guard(trainer.model)
+        trainer.evaluate()
+        refs = last_eval.get("ref", [])
+        hyps = last_eval.get("hyp", [])
+        if not hyps:
+            raise RuntimeError("the final evaluation produced no hypotheses")
+        if guard.calls == 0:
+            # A guard that was never invoked proves nothing; treat it as failure.
+            raise RuntimeError(
+                "generate() never ran through the language guard; "
+                "cannot confirm the forced language reached the model"
+            )
+
+        print("\n--- validation examples: read these before quoting the number ---")
+        for line in example_lines(refs, hyps, [r["utt_id"] for r in val_subset]):
+            print(line)
+        gates = pilot_gates(refs, hyps)
+        forced = guard.report()
+        print("\n" + json.dumps({"pilot_gates": gates, "language_forced": forced},
+                                indent=2, ensure_ascii=False))
+        if not gates["ok"]:
+            # Phase 2: fail closed. Nothing is published, so no test cache can be
+            # produced from an adapter that failed the pre-registered gates.
+            raise SystemExit("pilot gates failed: " + "; ".join(gates["failures"]))
+
+        trainer.model.save_pretrained(adapter_tmp)
         history = [h["eval_wer"] for h in trainer.state.log_history if "eval_wer" in h]
         if not history:
             raise RuntimeError("no validation WER was recorded; refusing to publish the adapter")
@@ -408,6 +703,8 @@ def train(args):
             "revision": revision,
             "group": args.group,
             "language": language_code,
+            "language_forced": forced,
+            "pilot_gates": gates,
             "lora": {"r": args.lora_r, "alpha": args.lora_alpha,
                      "dropout": args.lora_dropout, "targets": list(LORA_TARGETS)},
             "minutes_requested": args.minutes,
