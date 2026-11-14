@@ -4,6 +4,10 @@ The laptop never downloads audio. This module runs where the GPU is, writes
 16 kHz mono WAVs plus ``manifest_{train,val,test}.jsonl``, and leaves a
 ``audit.json`` that records every row that was dropped and why.
 
+Download-then-decode: each source is fetched as pinned parquet files with
+``hf_hub_download`` and then read batch by batch, so only rows the allocator
+admits are decoded. Per-row streaming was the bottleneck (~10 s/clip).
+
 Design rules baked in (see ANALYSIS_PLAN.md):
   * one row = one clip, but intervals resample speakers, so a speaker may never
     appear in two groups or two splits;
@@ -16,19 +20,20 @@ Design rules baked in (see ANALYSIS_PLAN.md):
 Usage (Colab):
   python -m speechgap.data build --out-dir data \
       --naija yoruba:0-0 \
-      --voxpopuli en_accented:test en:test \
-      --accents en_nl,en_de,en_cs
-
-  python -m speechgap.data build --out-dir data --naija hausa:0-0
+      --voxpopuli en:test \
+      --l2arctic \
+      --fleurs yo_ng:test --allow-clip-level
 
   python -m speechgap.data verify --out-dir data
 
 Sources:
   NaijaVoices public mirror  EYEDOL/naija-voices-{language}-split_{shard}
       language in {yoruba, hausa, igbo}; one repo per shard, config "default",
-      split "train". Unofficial mirror: licence/provenance unstated. The
+      split "train". Unofficial mirror: cc by-nc-sa 4.0, non-commercial. The
       resolved revision is recorded in audit.json.
   VoxPopuli                 facebook/voxpopuli pinned, configs en, de, en_accented.
+  L2-ARCTIC                 chikingsley/l2-arctic-manual-v5.0-16k, cc-by-nc-4.0;
+                            all four source splits pooled into one test-only group.
   FLEURS                    google/fleurs; no speaker id (clip-level only).
 """
 import argparse
@@ -48,6 +53,10 @@ NAIJA_LANGUAGES = ("yoruba", "hausa", "igbo")
 VOXPOPULI_REPO = "facebook/voxpopuli"
 VOXPOPULI_REVISION = "42f01879c780b4a2e90ec0b4f616c2ece526e4f1"
 FLEURS_REPO = "google/fleurs"
+L2ARCTIC_REPO = "chikingsley/l2-arctic-manual-v5.0-16k"
+L2ARCTIC_SPLITS = ("train", "validation", "test", "suitcase")
+L2ARCTIC_GROUP = "english_l2_arctic"
+L2ARCTIC_LANGUAGE = "en"
 TARGET_SR = 16000
 # Deterministic speaker-level split. Any change here invalidates old manifests.
 SPLIT_RATIOS = (("train", 70), ("val", 15), ("test", 15))
@@ -70,6 +79,8 @@ CONFIG_GROUPS = {
     "cs": "czech_read",
 }
 DEFAULT_ACCENTS = "en_nl,en_de,en_cs"
+# Cache of HF repo listings keyed by (repo, revision). Populated on first use.
+_REPO_FILE_CACHE = {}
 
 
 # ---------------------------------------------------------------------------
@@ -268,16 +279,118 @@ def write_wav(value, dest, target_sr=TARGET_SR):
     return len(y) / float(target_sr)
 
 
+def _repo_files(repo, revision=None):
+    """Repo file listing, cached per (repo, revision).
+
+    The listing is the provenance link between a source revision and the exact
+    parquet file bytes we download (Phase 1).
+    """
+    key = (repo, revision)
+    if key not in _REPO_FILE_CACHE:
+        from huggingface_hub import HfApi
+
+        _REPO_FILE_CACHE[key] = HfApi().list_repo_files(
+            repo, repo_type="dataset", revision=revision
+        )
+    return _REPO_FILE_CACHE[key]
+
+
+def select_parquet_files(files, config, split, max_files=None):
+    """Pure filter over a repo listing; see split_parquet_files for layouts."""
+    selected = []
+    for path in files:
+        parts = path.split("/")
+        name = parts[-1]
+        if not name.endswith(".parquet"):
+            continue
+        if config and config != "default" and config not in parts[:-1]:
+            continue
+        in_split = (
+            name.startswith(split + "-")
+            or name == split + ".parquet"
+            or (len(parts) >= 2 and parts[-2] == split)
+        )
+        if in_split:
+            selected.append(path)
+    selected = sorted(set(selected))
+    if not selected:
+        raise ValueError(
+            f"no parquet files for config={config!r} split={split!r}; "
+            "refusing to build an empty group"
+        )
+    return selected[:max_files] if max_files else selected
+
+
+def split_parquet_files(repo, config, split, revision=None, max_files=None):
+    """Pick the parquet files for one config/split from the repo listing.
+
+    Layouts seen in practice:
+      data/train-00000-of-00010.parquet              (NaijaVoices, L2-ARCTIC)
+      en/test-00000-of-00001.parquet                 (VoxPopuli)
+      parquet-data/yo_ng/test-00000-of-00001.parquet (FLEURS)
+
+    A source whose layout is not recognised raises instead of yielding zero
+    rows: silence here would look like a complete group with no data.
+    """
+    return select_parquet_files(_repo_files(repo, revision), config, split, max_files)
+
+
+def download_parquet(repo, files, revision=None):
+    """Download pinned parquet files into the Hugging Face cache.
+
+    The returned paths are local; callers decode batches lazily so a 0.9 GB
+    split never has to be materialised as Python objects all at once.
+    """
+    from huggingface_hub import hf_hub_download
+
+    return [
+        hf_hub_download(
+            repo_id=repo, filename=filename, repo_type="dataset", revision=revision
+        )
+        for filename in files
+    ]
+
+
+def _schema_names(paths):
+    import pyarrow.parquet as pq
+
+    if not paths:
+        raise ValueError("no parquet files to read")
+    return pq.ParquetFile(paths[0]).schema_arrow.names
+
+
+def _require_fields(names, required, label):
+    missing = [c for c in required if c not in set(names)]
+    if missing:
+        raise ValueError(
+            f"{label}: missing columns {missing}; saw {sorted(names)}. "
+            "Refusing to build from an unknown schema."
+        )
+
+
+def _iter_parquet(paths, columns=None, batch_size=64):
+    """Stream rows from downloaded parquet files, one Arrow batch at a time."""
+    import pyarrow.parquet as pq
+
+    for path in paths:
+        parquet = pq.ParquetFile(path)
+        for batch in parquet.iter_batches(batch_size=batch_size, columns=columns):
+            yield from batch.to_pylist()
+
+
 # ---------------------------------------------------------------------------
 # source iterators: yield candidates, record skips in a Counter
 # ---------------------------------------------------------------------------
 
-def iter_naija(language, shard, stats, max_scan=None, revision=None):
+def iter_naija(language, shard, stats, max_scan=None, revision=None, max_files=1):
     repo = NAIJA_TEMPLATE.format(language=language, shard=shard)
-    ds = _stream(repo, None, "train", revision)
-    _require_columns(ds.features, ("audio", "speaker_id", "text"), repo)
+    # One shard file already holds ~20k rows and hundreds of speakers; a second
+    # file would only add download time (deviations log, 2026-11-14).
+    files = split_parquet_files(repo, None, "train", revision, max_files=max_files)
+    paths = download_parquet(repo, files, revision)
+    _require_fields(_schema_names(paths), ("audio", "speaker_id", "text"), repo)
     group = f"{language}_read"
-    for i, row in enumerate(ds):
+    for i, row in enumerate(_iter_parquet(paths)):
         if max_scan is not None and i >= max_scan:
             print(f"{repo}: reached --max-scan {max_scan}")
             break
@@ -304,14 +417,16 @@ def iter_naija(language, shard, stats, max_scan=None, revision=None):
         }
 
 
-def iter_voxpopuli(config, split, stats, accents_seen, accents=(), max_scan=None):
-    ds = _stream(VOXPOPULI_REPO, config, split, VOXPOPULI_REVISION)
+def iter_voxpopuli(config, split, stats, accents_seen, accents=(), max_scan=None,
+                   revision=VOXPOPULI_REVISION):
+    files = split_parquet_files(VOXPOPULI_REPO, config, split, revision)
+    paths = download_parquet(VOXPOPULI_REPO, files, revision)
     required = ["audio", "speaker_id", "normalized_text", "audio_id"]
     if config == "en_accented":
         required.append("accent")
-    _require_columns(ds.features, required, f"{VOXPOPULI_REPO}/{config}")
+    _require_fields(_schema_names(paths), required, f"{VOXPOPULI_REPO}/{config}")
     language = "en" if config == "en_accented" else config
-    for i, row in enumerate(ds):
+    for i, row in enumerate(_iter_parquet(paths)):
         if max_scan is not None and i >= max_scan:
             break
         stats["rows"] += 1
@@ -349,19 +464,21 @@ def iter_voxpopuli(config, split, stats, accents_seen, accents=(), max_scan=None
         }
 
 
-def iter_fleurs(config, split, stats, clip_level=False, max_scan=None):
+def iter_fleurs(config, split, stats, clip_level=False, max_scan=None, revision=None):
     if not clip_level:
         raise ValueError(
             "FLEURS exposes no speaker_id; pass --allow-clip-level to include it "
             "and record that its intervals are clip-level, not speaker-clustered"
         )
-    ds = _stream(FLEURS_REPO, config, split, None)
-    _require_columns(ds.features, ("audio", "transcription"), f"{FLEURS_REPO}/{config}")
+    files = split_parquet_files(FLEURS_REPO, config, split, revision)
+    paths = download_parquet(FLEURS_REPO, files, revision)
+    _require_fields(_schema_names(paths), ("audio", "transcription"),
+                    f"{FLEURS_REPO}/{config}")
     code = config.split("_")[0]
     resolve_language(code)  # reject unknown language prefixes before streaming
     group = f"fleurs_{code}"
     split_name = {"test": "test", "validation": "val", "train": "train"}[split]
-    for i, row in enumerate(ds):
+    for i, row in enumerate(_iter_parquet(paths)):
         if max_scan is not None and i >= max_scan:
             break
         stats["rows"] += 1
@@ -380,6 +497,60 @@ def iter_fleurs(config, split, stats, clip_level=False, max_scan=None):
             "tag": f"{config}-{split}-{i}",
             "audio": row.get("audio"),
         }
+
+
+def l2arctic_candidates(rows_by_split):
+    """Pool L2-ARCTIC's source splits into one test-only, hash-shuffled list.
+
+    Pure and deterministic: the same rows in any file order produce the same
+    candidate order. Pooling is deliberate (24 speakers; a 70/15/15 hash split
+    would leave ~3 test speakers, below the 10-speaker floor), and every row is
+    test-only because L2-ARCTIC is never trained or validated on.
+    """
+    candidates = []
+    for split in L2ARCTIC_SPLITS:
+        for i, row in enumerate(rows_by_split.get(split, [])):
+            spk = _text(row.get("speaker_id"))
+            ref = _text(row.get("transcript"))
+            if not spk or not ref:
+                continue
+            tag = f"{split}-{spk}-{_text(row.get('utterance_id')) or i}"
+            candidates.append({
+                "source": "l2arctic",
+                "speaker_key": f"l2arctic:{spk}",
+                "group": L2ARCTIC_GROUP,
+                "split": "test",  # evaluation-only; pooled, never trained on
+                "language": L2ARCTIC_LANGUAGE,
+                "ref": ref,
+                "tag": tag,
+                "audio": row.get("audio"),
+                "_order": hashlib.sha256(
+                    f"l2arctic|{tag}".encode("utf-8")
+                ).hexdigest(),
+            })
+    candidates.sort(key=lambda c: (c["_order"], c["tag"]))
+    for candidate in candidates:
+        candidate.pop("_order")
+    return candidates
+
+
+def iter_l2arctic(stats, max_scan=None, revision=None):
+    paths_by_split = {}
+    for split in L2ARCTIC_SPLITS:
+        files = split_parquet_files(L2ARCTIC_REPO, "default", split, revision)
+        paths_by_split[split] = download_parquet(L2ARCTIC_REPO, files, revision)
+    names = _schema_names(paths_by_split["test"])
+    _require_fields(names, ("audio", "speaker_id", "transcript", "utterance_id"),
+                    L2ARCTIC_REPO)
+    rows_by_split = {}
+    for split, paths in paths_by_split.items():
+        rows_by_split[split] = list(_iter_parquet(paths))
+        stats[f"rows:{split}"] += len(rows_by_split[split])
+    for i, candidate in enumerate(l2arctic_candidates(rows_by_split)):
+        if max_scan is not None and i >= max_scan:
+            break
+        stats["rows"] += 1
+        yield candidate
 
 
 # ---------------------------------------------------------------------------
@@ -490,8 +661,11 @@ def _all_full(alloc, groups, splits=("train", "val", "test")):
 
 def build(args):
     caps = {"train": args.max_train, "val": args.max_val, "test": args.max_test}
-    if not (args.naija or args.voxpopuli or args.fleurs):
-        raise SystemExit("no sources requested; pass --naija, --voxpopuli, or --fleurs")
+    want_l2 = bool(getattr(args, "l2arctic", False))
+    if not (args.naija or args.voxpopuli or args.fleurs or want_l2):
+        raise SystemExit(
+            "no sources requested; pass --naija, --voxpopuli, --l2arctic, or --fleurs"
+        )
 
     accents = [a.strip() for a in args.accents.split(",") if a.strip()]
     jobs = []  # (kind, name, split, extra)
@@ -504,6 +678,9 @@ def build(args):
         name, split = _parse_pair(spec, "--voxpopuli")
         if name != "en_accented":
             jobs.append(("voxpopuli", name, split, None))
+    if want_l2:
+        # Pooled: all four source splits, test-only, one group.
+        jobs.append(("l2arctic", "pooled", "test", None))
     for spec in args.naija:
         lang, shards = _parse_pair(spec, "--naija")
         if lang not in NAIJA_LANGUAGES:
@@ -543,6 +720,7 @@ def build(args):
     accents_seen = Counter()
     revisions = {}
     decode_failures = []
+    seen_uids = set()
     handles = {s: open(os.path.join(staging, f"manifest_{s}.jsonl"), "w", encoding="utf-8")
                for s in ("train", "val", "test")}
 
@@ -555,23 +733,35 @@ def build(args):
                 it = iter_naija(name, split, stats[key], max_scan=args.max_scan,
                                 revision=revisions[repo])
                 groups = {f"{name}_read"}
+                needed = ("train", "val", "test")
             elif kind == "voxpopuli":
                 revisions[VOXPOPULI_REPO] = VOXPOPULI_REVISION
                 it = iter_voxpopuli(name, split, stats[key], accents_seen,
-                                    accents=extra or (), max_scan=args.max_scan)
+                                    accents=extra or (), max_scan=args.max_scan,
+                                    revision=VOXPOPULI_REVISION)
                 if name == "en_accented":
                     chosen = extra or []
                     groups = {f"english_l2_{a.split('_')[-1]}" for a in chosen}
                 else:
                     groups = {CONFIG_GROUPS.get(name, f"{name}_read")}
+                needed = ("test",)  # evaluation-only source
+            elif kind == "l2arctic":
+                revisions[L2ARCTIC_REPO] = _resolve_revision(L2ARCTIC_REPO)
+                it = iter_l2arctic(stats[key], max_scan=args.max_scan,
+                                   revision=revisions[L2ARCTIC_REPO])
+                groups = {L2ARCTIC_GROUP}
+                needed = ("test",)  # pooled and evaluation-only
             else:
+                revisions[FLEURS_REPO] = _resolve_revision(FLEURS_REPO)
                 it = iter_fleurs(name, split, stats[key], clip_level=args.allow_clip_level,
-                                 max_scan=args.max_scan)
+                                 max_scan=args.max_scan,
+                                 revision=revisions[FLEURS_REPO])
                 groups = {f"fleurs_{name.split('_')[0]}"}
+                needed = ({"train": "train", "validation": "val", "test": "test"}[split],)
 
             print(f"building {key} -> groups {sorted(groups)}")
             for cand in it:
-                if groups and _all_full(alloc, groups):
+                if groups and _all_full(alloc, groups, splits=needed):
                     break
                 scanned = stats[key]["rows"]
                 if scanned and scanned % 1000 == 0:
@@ -581,6 +771,17 @@ def build(args):
                 if not alloc.admit(cand["speaker_key"], cand["group"], cand["split"]):
                     continue
                 uid = utt_id(cand["source"], cand["tag"])
+                # Threat (Phase 3): two rows mapping to one uid write to one wav
+                # path, so the second silently overwrites the first while both
+                # stay in the manifest. L2-ARCTIC's utterance_id is only unique
+                # within a speaker, which is exactly how this happened. Fail here,
+                # before the audio is written, instead of after the whole build.
+                if uid in seen_uids:
+                    raise RuntimeError(
+                        f"utt_id collision {uid!r} from tag {cand['tag']!r}; "
+                        "refusing to overwrite audio"
+                    )
+                seen_uids.add(uid)
                 rel = f"audio/{cand['split']}/{uid}.wav"
                 dest = os.path.join(out_dir, rel)
                 tmp = dest + ".part"
@@ -635,11 +836,17 @@ def build(args):
         "caps": caps,
         "split_policy": (
             "sha256('split|'+speaker_key) % 100: <70 train, <85 val, else test. "
-            "Applied to NaijaVoices only. VoxPopuli is evaluation-only and stays test. "
-            "FLEURS follows the source split."
+            "Applied to NaijaVoices only. VoxPopuli and L2-ARCTIC are evaluation-only "
+            "and stay test. FLEURS follows the source split."
         ),
         "source_order": [f"{k}:{n}:{s}" for k, n, s, _ in jobs],
         "revisions": revisions,
+        "l2arctic": {
+            "repo": L2ARCTIC_REPO,
+            "source_splits": list(L2ARCTIC_SPLITS),
+            "pooled_into": "test",
+            "group": L2ARCTIC_GROUP,
+        },
         "groups": summary["groups"],
         "splits": summary["splits"],
         "dropped": dict(alloc.dropped),
@@ -675,9 +882,11 @@ def main(argv=None):
     b.add_argument("--naija", action="extend", nargs="+", default=[],
                    help="language:shard[,shard], e.g. yoruba:0-0 or hausa:0-0,0-1")
     b.add_argument("--voxpopuli", action="extend", nargs="+", default=[],
-                   help="config:split, e.g. en_accented:test or en:test")
+                   help="config:split, e.g. en:test or en_accented:test")
+    b.add_argument("--l2arctic", action="store_true",
+                   help="pool all four L2-ARCTIC source splits into one test-only group")
     b.add_argument("--accents", default=DEFAULT_ACCENTS,
-                   help="comma list for en_accented (default: en_nl,en_de,en_cs)")
+                   help="comma list for en_accented (legacy; L2-ARCTIC is pooled)")
     b.add_argument("--fleurs", action="extend", nargs="+", default=[],
                    help="config:split, e.g. yo_ng:test (requires --allow-clip-level)")
     b.add_argument("--allow-clip-level", action="store_true",

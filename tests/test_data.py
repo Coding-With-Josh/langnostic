@@ -5,7 +5,8 @@ import re
 import tempfile
 from collections import Counter
 
-from speechgap.data import (Allocator, make_record, split_for, utt_id,
+from speechgap.data import (Allocator, l2arctic_candidates, make_record,
+                            select_parquet_files, split_for, utt_id,
                             verify_manifests)
 
 
@@ -43,6 +44,84 @@ def test_utt_id_is_safe_and_collision_resistant():
     b = utt_id("naijavoices", "yoruba-0-0/1")
     assert re.fullmatch(r"[A-Za-z0-9._-]+", a)
     assert a != b
+
+
+def test_select_parquet_files_handles_every_source_layout():
+    naija = ["data/train-00000-of-00010.parquet",
+             "data/train-00001-of-00010.parquet", "README.md"]
+    assert select_parquet_files(naija, None, "train", max_files=1) == [
+        "data/train-00000-of-00010.parquet"
+    ]
+    voxpopuli = ["en/test-00000-of-00001.parquet",
+                 "en/train-00000-of-00030.parquet",
+                 "de/test-00000-of-00001.parquet"]
+    assert select_parquet_files(voxpopuli, "en", "test") == [
+        "en/test-00000-of-00001.parquet"
+    ]
+    fleurs = ["parquet-data/yo_ng/test-00000-of-00001.parquet",
+              "parquet-data/yo_ng/train-00000-of-00001.parquet"]
+    assert select_parquet_files(fleurs, "yo_ng", "test") == [
+        "parquet-data/yo_ng/test-00000-of-00001.parquet"
+    ]
+    l2 = ["data/train-00000-of-00001.parquet",
+          "data/validation-00000-of-00001.parquet",
+          "data/test-00000-of-00001.parquet",
+          "data/suitcase-00000-of-00001.parquet"]
+    assert select_parquet_files(l2, "default", "validation") == [
+        "data/validation-00000-of-00001.parquet"
+    ]
+    try:
+        select_parquet_files(["README.md"], "en", "test")
+    except ValueError as e:
+        assert "refusing to build an empty group" in str(e)
+    else:
+        raise AssertionError("an unknown layout must raise, not yield zero files")
+
+
+def test_l2arctic_candidates_pool_all_splits_into_one_test_group():
+    def row(speaker, utt, split):
+        return {"speaker_id": speaker, "transcript": f"text {utt}",
+                "utterance_id": utt, "corpus_split": split, "audio": {"bytes": b""}}
+
+    rows = {
+        "train": [row("A", "a1", "train"), row("B", "b1", "train")],
+        "validation": [row("C", "c1", "validation")],
+        "test": [row("D", "d1", "test")],
+        "suitcase": [row("E", "e1", "suitcase")],
+    }
+    cands = l2arctic_candidates(rows)
+    assert len(cands) == 5
+    assert {c["split"] for c in cands} == {"test"}
+    assert {c["group"] for c in cands} == {"english_l2_arctic"}
+    assert {c["speaker_key"] for c in cands} == {
+        "l2arctic:A", "l2arctic:B", "l2arctic:C", "l2arctic:D", "l2arctic:E"
+    }
+    # Pooling must not depend on the order files happened to be read in.
+    shuffled = {k: list(reversed(v)) for k, v in rows.items()}
+    assert [c["tag"] for c in cands] == [c["tag"] for c in l2arctic_candidates(shuffled)]
+
+
+def test_l2arctic_tags_disambiguate_speaker_scoped_utterance_ids():
+    # L2-ARCTIC reuses utterance ids across speakers (arctic_a0136 is one file
+    # per speaker). A tag without the speaker collapsed them to one utt_id and
+    # the second write overwrote the first's audio.
+    def row(speaker, utt):
+        return {"speaker_id": speaker, "transcript": "text",
+                "utterance_id": utt, "audio": {"bytes": b""}}
+
+    rows = {"train": [row("A", "arctic_a0136"), row("B", "arctic_a0136")],
+            "test": [row("C", "arctic_a0136")]}
+    cands = l2arctic_candidates(rows)
+    assert len({c["tag"] for c in cands}) == 3
+    assert len({utt_id(c["source"], c["tag"]) for c in cands}) == 3
+
+
+def test_l2arctic_candidates_skip_rows_without_a_speaker_or_reference():
+    rows = {"train": [{"speaker_id": "", "transcript": "text", "utterance_id": "a"},
+                      {"speaker_id": "A", "transcript": "  ", "utterance_id": "b"},
+                      {"speaker_id": "A", "transcript": "kept", "utterance_id": "c"}]}
+    cands = l2arctic_candidates(rows)
+    assert [c["tag"] for c in cands] == ["train-A-c"]
 
 
 def test_make_record_rejects_empty_fields():
@@ -141,6 +220,7 @@ def test_build_publishes_only_after_a_full_pass():
         with tempfile.TemporaryDirectory() as d:
             args = argparse.Namespace(
                 out_dir=d, naija=["yoruba:0-0"], voxpopuli=[], fleurs=[],
+                l2arctic=False,
                 accents="", allow_clip_level=False, allow_thin_groups=False,
                 max_train=900, max_val=100, max_test=300,
                 min_test_clips=200, min_test_speakers=10, min_seconds=0.1,
