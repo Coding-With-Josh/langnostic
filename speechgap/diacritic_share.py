@@ -79,7 +79,7 @@ def select_group(records, group):
 
 
 def check_reference_agreement(named_records):
-    """Same-length caches must hold the same references in the same order.
+    """Caches that hold the same clips must agree; a truncated prefix is an error.
 
     ``named_records`` is a list of ``(label, rows)``. References are compared
     after NFC/case/punctuation normalisation, because the committed FLEURS
@@ -87,21 +87,29 @@ def check_reference_agreement(named_records):
     lengths with different references mean the positional pairing is broken, so
     the run stops before scoring (Phase 2).
 
-    Different-length pairs are not comparable and are skipped; they are
-    different corpora, not the same clips.
+    Different-length pairs are normally different corpora and are skipped. If
+    one is a prefix of the other, they are the same clips with rows missing, so
+    a truncated cache is an error rather than a shorter table.
     """
     for i, (label_a, rows_a) in enumerate(named_records):
         refs_a = [normalize(r["ref"]) for r in rows_a]
         for label_b, rows_b in named_records[i + 1:]:
-            if len(rows_a) != len(rows_b):
-                continue
             refs_b = [normalize(r["ref"]) for r in rows_b]
-            for pos, (a, b) in enumerate(zip(refs_a, refs_b)):
-                if a != b:
-                    raise ValueError(
-                        f"references differ between {label_a} and {label_b} "
-                        f"at position {pos}"
-                    )
+            if len(refs_a) == len(refs_b):
+                for pos, (a, b) in enumerate(zip(refs_a, refs_b)):
+                    if a != b:
+                        raise ValueError(
+                            f"references differ between {label_a} and {label_b} "
+                            f"at position {pos}"
+                        )
+                continue
+            shared = min(len(refs_a), len(refs_b))
+            if refs_a[:shared] == refs_b[:shared]:
+                raise ValueError(
+                    f"{label_a} and {label_b} share a reference prefix but have "
+                    f"different row counts ({len(refs_a)} vs {len(refs_b)}); "
+                    "one cache may be truncated"
+                )
 
 
 def _counts(records, strip_diacritics):
@@ -209,10 +217,6 @@ def score_cache(records, n_boot=N_BOOT, seed=SEED):
         "all": variant(records, non_looped=False, n_boot=n_boot, seed=seed),
         "non_looped": variant(records, non_looped=True, n_boot=n_boot, seed=seed),
     }
-
-
-def _pct(value):
-    return "n/a" if value is None else f"{value:.1%}"
 
 
 def _rate_cell(metric):

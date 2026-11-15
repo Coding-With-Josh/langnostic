@@ -127,6 +127,13 @@ def test_reference_agreement_skips_different_lengths():
     check_reference_agreement([("a", a), ("b", b)])
 
 
+def test_reference_agreement_rejects_a_truncated_cache():
+    a = [_rec(f"u{i}", ref=f"line {i}") for i in range(4)]
+    b = [_rec(f"u{i}", ref=f"line {i}") for i in range(2)]
+    with pytest.raises(ValueError):
+        check_reference_agreement([("full", a), ("cut", b)])
+
+
 def test_markdown_escapes_labels_and_groups():
     recs = [_rec(f"u{i}", ref="à b", hyp="a b") for i in range(3)]
     md = to_markdown({
