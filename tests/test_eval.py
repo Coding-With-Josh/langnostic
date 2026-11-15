@@ -1,13 +1,35 @@
 """Tests for manifest validation, cache resume and the eval call shape.
 
-torch is imported only for the pipeline-shape test; no model is loaded and no
-inference runs.
+two tests need a third-party module: one builds fake tensors with torch, one
+inspects the installed transformers pipeline signature. no model is loaded and
+no inference runs. when the module is genuinely absent those two tests print a
+skip line and return, so the stdlib-only ci stays green; every other test here
+runs with no packages installed.
 """
 import json
 import os
 import tempfile
 
 from speechgap.eval import _read_partial, load_manifest, select_rows
+
+
+def _missing(module, test_name):
+    """true when `module` is not installed; prints the skip line and returns true.
+
+    only a ModuleNotFoundError naming this exact top-level module counts as
+    missing. a module that is present but broken (its own dependency absent, a
+    bad shared library) re-raises and fails the run, so a broken install cannot
+    silently drop coverage. the try wraps this __import__ and nothing else: an
+    import error raised inside a test body must fail, not skip.
+    """
+    try:
+        __import__(module)
+    except ModuleNotFoundError as exc:
+        if getattr(exc, "name", None) != module:
+            raise
+        print(f"skip {test_name} needs {module}")
+        return True
+    return False
 
 
 def _rec(i=0, **over):
@@ -136,6 +158,8 @@ def test_select_rows_refuses_an_empty_selection():
 
 
 def test_transcribe_chunk_keeps_the_decoding_call_and_detects_language_separately():
+    if _missing("torch", "test_transcribe_chunk_keeps_the_decoding_call_and_detects_language_separately"):
+        return
     import torch
     from types import SimpleNamespace
 
@@ -200,6 +224,8 @@ def test_transcribe_chunk_records_the_forced_language_without_detection():
 
 
 def test_the_real_pipeline_accepts_the_kwargs_the_eval_path_uses():
+    if _missing("transformers", "test_the_real_pipeline_accepts_the_kwargs_the_eval_path_uses"):
+        return
     import inspect
 
     from transformers.pipelines.automatic_speech_recognition import (

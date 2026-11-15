@@ -1,4 +1,9 @@
-"""Stdlib-only tests for the LoRA trainer's pre-flight guards."""
+"""Stdlib-only tests for the LoRA trainer's pre-flight guards.
+
+two tests inspect installed packages (peft for the adapter config, torch and
+transformers for the recorded versions). when one is genuinely absent they print
+a skip line and return; every other test here runs with no packages installed.
+"""
 import json
 import os
 import tempfile
@@ -11,6 +16,24 @@ from speechgap.train import (GenerateGuard, _publish_adapter, _trainer_metrics,
                              force_generation_kwargs, package_versions, pilot_gates,
                              probe_durations, prompt_language_check, prompt_prefix_ok,
                              select_clips, validate_failed_target)
+
+
+def _missing(module, test_name):
+    """true when `module` is not installed; prints the skip line and returns true.
+
+    same contract as the guard in test_eval.py: only a ModuleNotFoundError naming
+    this exact top-level module counts as missing, and the try wraps this
+    __import__ and nothing else. a package that is present but broken (its own
+    dependency absent, a bad shared library) re-raises and fails the run.
+    """
+    try:
+        __import__(module)
+    except ModuleNotFoundError as exc:
+        if getattr(exc, "name", None) != module:
+            raise
+        print(f"skip {test_name} needs {module}")
+        return True
+    return False
 
 
 def _row(i, speaker="s0", group="yoruba_read", lang="yoruba"):
@@ -113,6 +136,8 @@ def test_assert_language_kwargs_rejects_every_unforced_call():
 
 
 def test_lora_config_does_not_use_the_seq2seq_wrapper():
+    if _missing("peft", "test_lora_config_does_not_use_the_seq2seq_wrapper"):
+        return
     # Regression: PeftModelForSeq2SeqLM.forward passes input_ids=None to a Whisper
     # forward that has no such parameter, which crashes the first training step
     # with "WhisperDecoder() got multiple values for keyword argument 'input_ids'".
@@ -389,6 +414,12 @@ def test_publish_adapter_writes_atomically_and_cleans_up_on_failure():
 
 
 def test_package_versions_names_the_three_packages():
+    # package_versions() imports torch then transformers, so check both first;
+    # peft is read from metadata only and is allowed to be None.
+    if _missing("torch", "test_package_versions_names_the_three_packages"):
+        return
+    if _missing("transformers", "test_package_versions_names_the_three_packages"):
+        return
     versions = package_versions()
     assert set(versions) == {"transformers", "torch", "peft"}
     assert isinstance(versions["transformers"], str)
