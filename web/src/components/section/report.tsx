@@ -109,8 +109,8 @@ function Section({
       id={id}
       className="scroll-mt-16 border-t border-black/10 text-black"
     >
-      <div className="mx-auto grid max-w-5xl gap-4 px-6 py-14 sm:grid-cols-[11rem_1fr] sm:gap-10">
-        <h2 className="font-sans text-sm text-black/50">{title}</h2>
+      <div className="mx-auto grid max-w-5xl gap-6 px-4 py-10 md:gap-10 md:px-6 md:py-14 md:grid-cols-[11rem_1fr]">
+        <h2 className="font-sans text-sm text-black/50 md:self-start">{title}</h2>
         <div className="flex min-w-0 flex-col gap-6">{children}</div>
       </div>
     </section>
