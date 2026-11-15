@@ -1,4 +1,8 @@
-"""Stdlib-only tests for manifest validation and cache resume. No model needed."""
+"""Tests for manifest validation, cache resume and the eval call shape.
+
+torch is imported only for the pipeline-shape test; no model is loaded and no
+inference runs.
+"""
 import json
 import os
 import tempfile
@@ -131,27 +135,96 @@ def test_select_rows_refuses_an_empty_selection():
             raise AssertionError(f"must refuse {kwargs}: an empty run would score as nan")
 
 
-def test_pipe_call_requests_language_only_on_the_auto_detect_path():
-    from speechgap.eval import _pipe_call_kwargs
+def test_transcribe_chunk_keeps_the_decoding_call_and_detects_language_separately():
+    import torch
+    from types import SimpleNamespace
 
-    forced = _pipe_call_kwargs("yo", True)
-    assert forced["return_language"] is False
-    assert forced["generate_kwargs"] == {"task": "transcribe", "language": "yo"}
-    auto = _pipe_call_kwargs(None, False)
-    assert auto["return_language"] is True
-    assert auto["generate_kwargs"] == {"task": "transcribe"}
+    from speechgap.eval import _transcribe_chunk
+
+    class FakeModel:
+        device = "cpu"
+        generation_config = SimpleNamespace(lang_to_id={"<|en|>": 1, "<|yo|>": 2})
+
+        def detect_language(self, input_features):
+            assert tuple(input_features.shape) == (2, 80, 3000)
+            return torch.tensor([2, 1])
+
+    class FakePipe:
+        model = FakeModel()
+
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, paths, **kwargs):
+            self.calls.append((list(paths), kwargs))
+            return [{"text": "hyp-a"}, {"text": "hyp-b"}]
+
+        def preprocess(self, path, chunk_length_s=0):
+            yield {"input_features": torch.zeros(1, 80, 3000)}
+
+    rows = [_rec(0), _rec(1)]
+    pipe = FakePipe()
+    recs = _transcribe_chunk(pipe, rows, ["a.wav", "b.wav"], None, False)
+    assert pipe.calls == [(["a.wav", "b.wav"],
+                           {"batch_size": 2,
+                            "generate_kwargs": {"task": "transcribe"}})]
+    assert "return_language" not in pipe.calls[0][1]
+    assert "return_timestamps" not in pipe.calls[0][1]["generate_kwargs"]
+    assert [r["language"] for r in recs] == ["yo", "en"]
+    assert [r["hyp"] for r in recs] == ["hyp-a", "hyp-b"]
 
 
-def test_cache_record_keeps_the_detected_language_then_the_forced_one():
+def test_transcribe_chunk_records_the_forced_language_without_detection():
+    from speechgap.eval import _transcribe_chunk
+
+    class FakePipe:
+        model = object()
+
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, paths, **kwargs):
+            self.calls.append(kwargs)
+            return [{"text": "hyp"}]
+
+        def preprocess(self, path, chunk_length_s=0):
+            raise AssertionError("forced runs must not run language detection")
+
+    pipe = FakePipe()
+    recs = _transcribe_chunk(pipe, [_rec(0)], ["a.wav"], "yo", True)
+    assert pipe.calls == [{"batch_size": 1,
+                           "generate_kwargs": {"task": "transcribe",
+                                               "language": "yo"}}]
+    assert recs[0]["language"] == "yo"
+    assert recs[0]["hyp"] == "hyp"
+
+
+def test_the_real_pipeline_accepts_the_kwargs_the_eval_path_uses():
+    import inspect
+
+    from transformers.pipelines.automatic_speech_recognition import (
+        AutomaticSpeechRecognitionPipeline,
+    )
+    from transformers.pipelines.base import Pipeline
+
+    assert "batch_size" in inspect.signature(Pipeline.__call__).parameters
+    preprocess = inspect.signature(AutomaticSpeechRecognitionPipeline.preprocess)
+    assert "chunk_length_s" in preprocess.parameters
+    sanitize = inspect.signature(
+        AutomaticSpeechRecognitionPipeline._sanitize_parameters)
+    assert "return_language" in sanitize.parameters
+
+
+def test_cache_record_prefers_the_detected_language():
     from speechgap.eval import _cache_record
 
     row = _rec(0)
-    detected = _cache_record(row, {"text": "bawo", "language": "en"}, "yo")
-    assert detected["language"] == "en"
-    assert detected["hyp"] == "bawo"
-    assert set(detected) == {"utt_id", "speaker", "group", "ref", "hyp", "language"}
-    assert _cache_record(row, {"text": "bawo"}, "yo")["language"] == "yo"
-    assert _cache_record(row, {"text": "x", "language": None}, None)["language"] is None
+    rec = _cache_record(row, {"text": "bawo"}, "yo", "en")
+    assert rec["language"] == "en"
+    assert rec["hyp"] == "bawo"
+    assert set(rec) == {"utt_id", "speaker", "group", "ref", "hyp", "language"}
+    assert _cache_record(row, {"text": "x"}, "yo")["language"] == "yo"
+    assert _cache_record(row, {"text": "x"}, None, None)["language"] is None
 
 
 if __name__ == "__main__":

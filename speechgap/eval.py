@@ -243,26 +243,60 @@ def _write_meta(out_path, meta):
     os.replace(tmp, meta_path)
 
 
-def _pipe_call_kwargs(lang, force_language):
-    """Pipeline kwargs for one language bucket.
-
-    ``return_language`` is requested only on the auto-detect path: a forced run
-    keeps the pre-existing call shape, so its output cannot change. The detected
-    code is recorded per row because the sidecar only knows the forced bucket.
-    """
+def _pipe_call_kwargs(lang):
+    """Pipeline kwargs for one language bucket; never requests timestamps."""
     generate_kwargs = {"task": "transcribe"}
     if lang:
         generate_kwargs["language"] = lang
-    return {"generate_kwargs": generate_kwargs,
-            "return_language": not force_language}
+    return {"generate_kwargs": generate_kwargs}
 
 
-def _cache_record(row, pred, lang):
-    """One cache row; language is the detected code, else the forced bucket."""
+def _cache_record(row, pred, lang, detected=None):
+    """One cache row; the detected code wins, else the forced bucket."""
     rec = {k: row[k] for k in ("utt_id", "speaker", "group", "ref")}
     rec["hyp"] = pred["text"]
-    rec["language"] = pred.get("language") or lang
+    rec["language"] = detected or lang
     return rec
+
+
+def _detect_languages(pipe, paths):
+    """Language code per clip from one detection pass, never from decoding.
+
+    The ASR pipeline exposes the detected code only inside ``chunks``; asking
+    for timestamps to read it would change generation. ``detect_language`` is
+    the supported one-step detector: encoder plus one decoder step, no text.
+    """
+    import torch
+
+    model = pipe.model
+    if not hasattr(model, "detect_language"):
+        base = getattr(model, "base_model", None)
+        model = getattr(base, "model", base) if base is not None else model
+    if not hasattr(model, "detect_language"):
+        raise RuntimeError("model has no detect_language; cannot record the language")
+
+    features = []
+    for path in paths:
+        pre = pipe.preprocess(path, chunk_length_s=0)
+        item = next(pre) if hasattr(pre, "__next__") else pre
+        features.append(item["input_features"])
+    batch = torch.cat(features, dim=0).to(getattr(model, "device", None) or pipe.device)
+    ids = model.detect_language(input_features=batch).tolist()
+    config = getattr(model, "generation_config", None) or pipe.model.generation_config
+    id_to_lang = {v: k.strip("<|>") for k, v in config.lang_to_id.items()}
+    return [id_to_lang.get(i) for i in ids]
+
+
+def _transcribe_chunk(pipe, chunk, paths, lang, force_language):
+    """One pipeline call plus, on auto-detect, one separate language pass."""
+    preds = pipe(paths, batch_size=len(paths), **_pipe_call_kwargs(lang))
+    if isinstance(preds, dict):
+        preds = [preds]
+    if len(preds) != len(chunk):
+        raise RuntimeError(f"expected {len(chunk)} transcripts, got {len(preds)}")
+    detected = _detect_languages(pipe, paths) if not force_language else [None] * len(chunk)
+    return [_cache_record(r, pred, lang, d)
+            for r, pred, d in zip(chunk, preds, detected)]
 
 
 def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
@@ -366,16 +400,8 @@ def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
             for start in range(0, len(bucket), batch_size):
                 chunk = bucket[start:start + batch_size]
                 paths = [pending_paths[r["utt_id"]] for r in chunk]
-                preds = pipe(paths, batch_size=len(paths),
-                             **_pipe_call_kwargs(lang, force_language))
-                if isinstance(preds, dict):
-                    preds = [preds]
-                if len(preds) != len(chunk):
-                    raise RuntimeError(
-                        f"expected {len(chunk)} transcripts, got {len(preds)}"
-                    )
-                for r, pred in zip(chunk, preds):
-                    rec = _cache_record(r, pred, lang)
+                for rec in _transcribe_chunk(pipe, chunk, paths, lang,
+                                             force_language):
                     out.write(json.dumps(rec, ensure_ascii=False) + "\n")
                     written += 1
                 # Flush per batch: a Colab disconnect must not lose the batch.
