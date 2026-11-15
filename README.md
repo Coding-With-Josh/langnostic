@@ -1,5 +1,7 @@
 # langnostic
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Coding-With-Josh/langnostic/blob/main/notebooks/colab_run.ipynb)
+
 > working name; rename the repo and the `speechgap` package if the name changes.
 
 Does speech recognition hear every language and accent equally well? This project measures
