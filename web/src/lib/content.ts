@@ -13,7 +13,7 @@ export const hypotheses: [string, string][] = [
 ];
 
 export const datasets: string[][] = [
-  ["naijavoices Yoruba", "train, val, test", "900 (495), 100 (64), 300 (139)", "cc by-nc-sa 4.0, unofficial mirror"],
+  ["naijavoices Yoruba", "train, val, test", "900 (495), 100 (64), 300 (139)", "cc by-nc-sa 4.0, third-party mirror"],
   ["fleurs Yoruba", "test, first 100 scored", "300 (no speaker ids)", "cc by 4.0"],
   ["voxpopuli english", "test, first 100 scored", "300 (153)", "cc0"],
   ["l2-arctic english", "test, first 100 scored", "300 (24)", "cc by-nc 4.0"],
@@ -56,14 +56,14 @@ export const limitations: string[] = [
   "for adapter runs i checked the language in the generate arguments only. the check at the decoder input never attached under peft.",
   "i make no per-accent claims. l2-arctic is pooled, 24 speakers.",
   "i do not distribute the adapter and there is no live demo, because of the dataset licence.",
-  "my naijavoices copy is an unofficial mirror of a gated dataset.",
+  "my naijavoices copy is a third-party mirror of a gated dataset.",
 ];
 
 export const sources: string[] = [
   "whisper-small, openai",
   "peft, hugging face",
   "fleurs, google",
-  "naijavoices, eyedol mirror",
+  "naijavoices, third-party mirror (eyedol)",
   "voxpopuli, meta",
   "l2-arctic",
   "kaggle and google colab for compute",

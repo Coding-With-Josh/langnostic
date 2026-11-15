@@ -234,7 +234,7 @@ const limitationTerms: Terms = {
   "one seed per run": { color: LIGHT_RED, action: "highlight" },
   "cannot separate": { color: LIGHT_RED, action: "highlight" },
   "no live demo": { color: LIGHT_RED, action: "highlight" },
-  "unofficial mirror": { color: LIGHT_RED, action: "highlight" },
+  "third-party mirror": { color: LIGHT_RED, action: "highlight" },
 };
 
 function Bullets({
