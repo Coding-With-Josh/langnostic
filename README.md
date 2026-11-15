@@ -24,6 +24,8 @@ these are descriptive: one seed per run, no confirmatory claim, and fleurs has n
 
 limits: one seed per run. the 15-minute adapter failed its validation gate twice and is not used. the 30-minute run passed validation (97.1% wer) but scored 131.6% on test, partly because validation decodes without chunking and test uses 30-second chunks. the language token is unverified for adapter runs, and the english rows are forced to english. dropping looped clips is a post-hoc view. fleurs intervals are clip-level. a native speaker corrected the reference for one example clip; no native speaker has scored the model outputs.
 
+more caveats on decoding, the language token and scoring are in notes.md.
+
 ## repo layout
 
 | path | what it is |

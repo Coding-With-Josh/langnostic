@@ -44,3 +44,6 @@ dist/
 # Website (Next.js): install and build output stay local.
 web/node_modules/
 web/.next/
+RESEARCH_HANDOFF.md
+langnostic project doc.md
+agent.md

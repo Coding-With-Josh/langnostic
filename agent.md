@@ -1,1 +1,0 @@
-from now on, after every edit batch you give, push create a good commit message, with prefix like either add: or fix: or ..... you get... one line and all small letters and push..
