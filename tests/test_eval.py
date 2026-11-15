@@ -3,7 +3,7 @@ import json
 import os
 import tempfile
 
-from speechgap.eval import _read_partial, load_manifest
+from speechgap.eval import _read_partial, load_manifest, select_rows
 
 
 def _rec(i=0, **over):
@@ -107,6 +107,28 @@ def test_report_refuses_a_partial_cache():
         assert ".part" in str(e)
     else:
         raise AssertionError("a .part cache must not be scored")
+
+
+def test_select_rows_filters_group_before_limit():
+    rows = [_rec(0, group="english_read"), _rec(1, group="fleurs_yo"),
+            _rec(2, group="fleurs_yo"), _rec(3, group="fleurs_yo")]
+    # limit=2 must be "first 2 of fleurs_yo", not "first 2 of the manifest"
+    got = select_rows(rows, group="fleurs_yo", limit=2)
+    assert [r["utt_id"] for r in got] == ["u1", "u2"]
+    assert len(select_rows(rows, group="fleurs_yo")) == 3
+    assert len(select_rows(rows, limit=2)) == 2
+
+
+def test_select_rows_refuses_an_empty_selection():
+    rows = [_rec(0, group="english_read")]
+    for kwargs in ({"group": "fleurs_yo"}, {"group": " "}, {"group": ""},
+                   {"limit": 0}, {"limit": -3}):
+        try:
+            select_rows(rows, **kwargs)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"must refuse {kwargs}: an empty run would score as nan")
 
 
 if __name__ == "__main__":

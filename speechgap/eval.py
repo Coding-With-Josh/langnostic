@@ -83,6 +83,27 @@ def load_manifest(path):
     return rows
 
 
+def select_rows(rows, group=None, limit=None):
+    """Pick the rows for this run: group filter first, then the limit.
+
+    Threat (Phase 3): the group filter must be applied before ``--limit``, or a
+    "first 100 of group X" run silently becomes "first 100 of the manifest".
+    An unmatched group raises instead of yielding an empty run, because an empty
+    cache scores as an error rate of nan/0 and would read as a perfect result.
+    """
+    if group is not None:
+        if not isinstance(group, str) or not group.strip():
+            raise ValueError("--group must be a non-empty string")
+        rows = [r for r in rows if r["group"] == group]
+        if not rows:
+            raise ValueError(f"--group {group!r} matched no rows; refusing an empty run")
+    if limit is not None:
+        if limit < 1:
+            raise ValueError("--limit must be at least 1")
+        rows = rows[:limit]
+    return rows
+
+
 def resolve_device(requested):
     """Resolve 'auto' honestly; never fall back from an explicit cuda request."""
     import torch
@@ -190,7 +211,7 @@ def _write_meta(out_path, meta):
 
 def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
                device=None, force_language=True, force=False, resume=False,
-               batch_size=None, revision=None, limit=None, fp32=False):
+               batch_size=None, revision=None, limit=None, fp32=False, group=None):
     if force:
         for p in (out_path, out_path + ".part"):
             if os.path.exists(p):
@@ -207,10 +228,7 @@ def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
         )
 
     rows = load_manifest(manifest)
-    if limit is not None:
-        if limit < 1:
-            raise ValueError("--limit must be at least 1")
-        rows = rows[:limit]
+    rows = select_rows(rows, group=group, limit=limit)
     ids = {r["utt_id"] for r in rows}
     done = _read_partial(part_path, ids) if resume else set()
     if done:
@@ -321,6 +339,7 @@ def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
         "dtype": str(dtype).replace("torch.", ""),
         "batch_size": batch_size,
         "force_language": bool(force_language),
+        "group": group,
         "n_manifest_rows": len(rows),
         "n_transcribed_this_run": written,
         "n_resumed": len(done),
@@ -344,7 +363,9 @@ if __name__ == "__main__":
                     help="auto, cpu, mps, cuda, or cuda:0")
     ap.add_argument("--batch-size", type=int, default=None)
     ap.add_argument("--limit", type=int, default=None,
-                    help="smoke test on the first N manifest rows")
+                    help="smoke test on the first N selected rows")
+    ap.add_argument("--group", default=None,
+                    help="only transcribe rows in this manifest group (applied before --limit)")
     ap.add_argument("--fp32", action="store_true",
                     help="disable fp16 on cuda (use if you see NaN/empty output)")
     ap.add_argument("--no-force-language", action="store_true")
@@ -355,4 +376,4 @@ if __name__ == "__main__":
     transcribe(a.manifest, a.out, model_name=a.model, adapter=a.adapter,
                device=a.device, force_language=not a.no_force_language,
                force=a.force, resume=a.resume, batch_size=a.batch_size,
-               revision=a.revision, limit=a.limit, fp32=a.fp32)
+               revision=a.revision, limit=a.limit, fp32=a.fp32, group=a.group)
