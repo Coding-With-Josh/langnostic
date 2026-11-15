@@ -23,16 +23,19 @@ const Hero = () => {
 
       <div className="flex max-w-[50rem] flex-col items-center gap-4">
         <h1 className="max-w-[26ch] text-balance text-4xl leading-[1.05] tracking-[-0.03em] sm:text-5xl">
-          a study of <Highlighter action="circle" color="#FF9D00">
-    whisper-small
-  </Highlighter>{" "} across languages and accents
+          a study of{" "}
+          <Highlighter action="circle" color="#FF9D00">
+            {" "}
+            whisper-small{" "}
+          </Highlighter>{" "}
+          across languages and accents
           {/* a study of <span className="font-thin italic">whisper-small</span> across languages and accents */}
         </h1>
 
         <p className="max-w-3xl text-balance font-sans text-md leading-relaxed tracking-[-0.01em] text-black/60">
-          i measure <span className="italic">whisper-small</span> across languages and accents, and
-          test whether a small lora adapter trained on 30 minutes of audio
-          closes the gap.
+          i measure <span className="italic">whisper-small</span> across
+          languages and accents, and test whether a small lora adapter trained
+          on 30 minutes of audio closes the gap.
         </p>
       </div>
 

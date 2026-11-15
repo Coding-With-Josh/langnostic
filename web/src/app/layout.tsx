@@ -60,7 +60,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${copernicus.variable} ${hostGrotesk.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${hostGrotesk.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
