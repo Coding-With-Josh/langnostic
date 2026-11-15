@@ -8,7 +8,21 @@ does speech recognition hear every language and accent equally well? this projec
 
 built for the veritas ai international high school hackathon 2026 (track: ai + languages).
 
-**status:** early. results go in `results/` and this file as they land. nothing here is a finding yet.
+**site:** [langnostic.vercel.app](https://langnostic.vercel.app)
+
+**status:** built, run and scored. the results are below.
+
+## results
+
+whisper-small is very bad at yoruba zero-shot: 940.0% wer on the 300-clip naija test set and 367.4% on the 100-clip fleurs test set, mostly repetition loops (77% of naija zero-shot hypotheses loop). on english it is fine: 10.6% wer on english read and 8.7% on l2-arctic.
+
+a 30-minute lora adapter cuts yoruba wer on held-out speakers from 940.0% to 131.6% on naija and from 367.4% to 124.6% on fleurs, but mostly by stopping those loops (the naija loop rate falls from 77% to 10.3%). on clips that do not loop, wer is still 92.1% on naija and 95.6% on fleurs. it does not yet transcribe yoruba accurately.
+
+the adapter costs english: 17.6% wer on english read (from 10.6%) and 108.6% on accented l2-arctic english (from 8.7%).
+
+h7 proxy: stripping tone marks and underdots removes only a minority of word errors: 13.8% on the naija adapter, 14.5% on the fleurs adapter, and no more than 23.7% on any cache or clip set. it does not check whether the marks that are present are correct.
+
+these are descriptive: one seed per run, no confirmatory claim, and fleurs has no speaker ids, so its intervals are clip-level and optimistic. every number above comes from the committed reports in `results/`; intervals, the deviations log and the rest of the report are on the [site](https://langnostic.vercel.app).
 
 ## repo layout
 
