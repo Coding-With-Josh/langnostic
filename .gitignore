@@ -12,6 +12,8 @@ data/*
 
 # Model artifacts: keep adapters on the HF Hub or a release, not in git.
 checkpoints/
+# A gate-failed adapter is local-only even if written outside checkpoints/.
+*.failed/
 *.safetensors
 *.ckpt
 *.pt

@@ -2,12 +2,13 @@
 import os
 import tempfile
 
-from speechgap.train import (GenerateGuard, assert_language_kwargs, build_lora_config,
-                             cap_rows, check_disjoint, check_homogeneous,
+from speechgap.train import (GenerateGuard, _publish_adapter, assert_language_kwargs,
+                             build_lora_config, cap_rows, check_disjoint,
+                             check_homogeneous, decoder_embedding,
                              degenerate_reasons, example_lines,
-                             force_generation_kwargs, pilot_gates,
-                             probe_durations, prompt_language_check,
-                             select_clips)
+                             force_generation_kwargs, package_versions, pilot_gates,
+                             probe_durations, prompt_language_check, prompt_prefix_ok,
+                             select_clips, validate_failed_target)
 
 
 def _row(i, speaker="s0", group="yoruba_read", lang="yoruba"):
@@ -231,6 +232,156 @@ def test_generate_guard_records_an_unobservable_prompt_without_passing_it():
     model.generate(language="yo", task="transcribe")
     assert guard.calls == 1
     assert not guard.prompt_observable and not guard.prompt_verified
+
+
+def test_prompt_prefix_ok_requires_the_exact_three_tokens():
+    assert prompt_prefix_ok([50258, 50325, 50359, 42], 50258, 50325, 50359)
+    assert not prompt_prefix_ok([50258, 50259, 50359], 50258, 50325, 50359)
+    assert not prompt_prefix_ok([50258], 50258, 50325, 50359)
+    assert not prompt_prefix_ok([], 50258, 50325, 50359)
+
+
+class _FakeEmbed:
+    def __init__(self):
+        self.hooks = []
+
+    def register_forward_pre_hook(self, fn):
+        self.hooks.append(fn)
+
+    def __call__(self, ids):
+        for hook in self.hooks:
+            hook(self, (ids,))
+        return ids
+
+
+class _Node:
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+class _FakePeft:
+    """PeftModel -> LoraModel -> WhisperForConditionalGeneration -> WhisperModel -> decoder."""
+
+    def __init__(self, fed_ids, sequences):
+        self.fed_ids = fed_ids
+        self.sequences = sequences
+        self.seen = []
+        self.embed = _FakeEmbed()
+        self.decoder = _Node(embed_tokens=self.embed)
+        self.model = _Node(decoder=self.decoder)
+        self.base_model = _Node(model=_Node(model=self.model))
+
+    def generate(self, **kwargs):
+        self.seen.append(kwargs)
+        self.embed(self.fed_ids)
+        return self.sequences
+
+
+def test_guard_verifies_from_the_decoder_input_when_the_prompt_is_stripped():
+    model = _FakePeft([50258, 50325, 50359], sequences=[[42, 43]])
+    guard = GenerateGuard(model, "yo", "transcribe", decoder_start_id=50258,
+                          language_id=50325, task_id=50359).install(model)
+    model.generate(language="yo", task="transcribe")
+    assert guard.calls == 1
+    assert guard.prompt_verified and guard.prompt_source == "decoder_input"
+
+
+def test_guard_refuses_a_decoder_prompt_with_the_wrong_language():
+    model = _FakePeft([50258, 50259, 50359], sequences=[[42, 43]])
+    GenerateGuard(model, "yo", "transcribe", decoder_start_id=50258,
+                  language_id=50325, task_id=50359).install(model)
+    try:
+        model.generate(language="yo", task="transcribe")
+    except RuntimeError as e:
+        assert "did not take effect" in str(e)
+    else:
+        raise AssertionError("a decoder prompt without <|yo|> must be refused")
+
+
+def test_decoder_embedding_returns_none_without_an_embedding():
+    assert decoder_embedding(_Node()) is None
+
+
+def test_validate_failed_target_requires_the_suffix_and_a_distinct_path():
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "yo15")
+        good = os.path.join(d, "yo15.failed")
+        assert validate_failed_target(good, out_path=out) == os.path.abspath(good)
+        assert validate_failed_target(None) is None
+        for path, out_path in ((out, out), ("", out), (good, good), ("   ", out)):
+            try:
+                validate_failed_target(path, out_path=out_path)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"must reject {path!r} with out {out_path!r}")
+        os.makedirs(good)
+        try:
+            validate_failed_target(good, out_path=out)
+        except ValueError as e:
+            assert "exists" in str(e)
+        else:
+            raise AssertionError("must refuse an existing destination without force")
+        assert validate_failed_target(good, out_path=out, force=True) == os.path.abspath(good)
+
+
+def test_validate_failed_target_refuses_a_symlink():
+    with tempfile.TemporaryDirectory() as d:
+        real = os.path.join(d, "real")
+        os.makedirs(real)
+        link = os.path.join(d, "yo15.failed")
+        os.symlink(real, link)
+        try:
+            validate_failed_target(link, out_path=os.path.join(d, "yo15"), force=True)
+        except ValueError as e:
+            assert "symlink" in str(e)
+        else:
+            raise AssertionError("a symlink destination must be refused")
+
+
+class _SavingModel:
+    def __init__(self, fail=False):
+        self.fail = fail
+
+    def save_pretrained(self, path):
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, "adapter_model.safetensors"), "w",
+                  encoding="utf-8") as f:
+            f.write("x")
+        if self.fail:
+            raise RuntimeError("boom")
+
+
+def test_publish_adapter_writes_atomically_and_cleans_up_on_failure():
+    with tempfile.TemporaryDirectory() as d:
+        dest = os.path.join(d, "yo15.failed")
+        _publish_adapter(_SavingModel(), dest, {"publishable": False})
+        assert os.path.isfile(os.path.join(dest, "train_meta.json"))
+        assert os.path.isfile(os.path.join(dest, "adapter_model.safetensors"))
+        try:
+            _publish_adapter(_SavingModel(), dest, {})
+        except FileExistsError:
+            pass
+        else:
+            raise AssertionError("must refuse an existing destination without --force")
+        broken = os.path.join(d, "broken.failed")
+        try:
+            _publish_adapter(_SavingModel(fail=True), broken, {})
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("a failed save must raise")
+        assert not os.path.exists(broken)
+        assert not [p for p in os.listdir(d) if p.startswith(".publish-")]
+
+
+def test_package_versions_names_the_three_packages():
+    versions = package_versions()
+    assert set(versions) == {"transformers", "torch", "peft"}
+    assert isinstance(versions["transformers"], str)
+    assert isinstance(versions["torch"], str)
+    assert versions["peft"] is None or isinstance(versions["peft"], str)
 
 
 if __name__ == "__main__":

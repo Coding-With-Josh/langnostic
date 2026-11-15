@@ -71,6 +71,10 @@ PILOT_EXAMPLES = 3
 # anything observed in a healthy run, including the 367% WER yoruba baseline.
 LOOP_RATIO = 10.0
 
+# A gate-failed adapter may still be evaluated, but its directory name must say
+# so. The suffix is the label that keeps it from being read as a result.
+FAILED_SUFFIX = ".failed"
+
 
 # ---------------------------------------------------------------------------
 # pure helpers (stdlib only: unit-tested in CI)
@@ -309,6 +313,129 @@ def prompt_language_check(sequences, decoder_start_id, language_id, task_id):
     return first[1] == language_id and first[2] == task_id
 
 
+def validate_failed_target(path, out_path=None, force=False):
+    """Validate ``--save-failed-adapter`` before any GPU time is spent.
+
+    Threat (Phase 3): a misnamed or aliased destination lets a gate-failed
+    adapter sit where a real result is expected. The ``.failed`` suffix is the
+    label; the path must also differ from ``--out`` so a failed run cannot
+    overwrite the publish target. Symlinks are refused because ``--force`` would
+    otherwise follow one and delete or replace whatever it points at.
+    """
+    if path is None:
+        return None
+    if not str(path).strip():
+        raise ValueError("--save-failed-adapter needs a non-empty path")
+    target = os.path.abspath(path)
+    if not target.endswith(FAILED_SUFFIX):
+        raise ValueError(
+            f"--save-failed-adapter must end with {FAILED_SUFFIX!r} so a failed "
+            f"artifact cannot be mistaken for a result: {target}"
+        )
+    if out_path is not None and os.path.abspath(out_path) == target:
+        raise ValueError("--save-failed-adapter must differ from --out")
+    if os.path.islink(target):
+        raise ValueError(f"refusing a symlink destination: {target}")
+    if os.path.exists(target) and not force:
+        raise ValueError(f"{target} exists; pass --force to replace it")
+    return target
+
+
+def _publish_adapter(model, dest, meta, force=False):
+    """Write one adapter directory atomically, or write nothing.
+
+    Threat (Phase 3): a crash between ``save_pretrained`` and the final rename
+    would leave a half-written directory that still looks like an adapter. The
+    staging dir lives in the destination's own parent so ``os.replace`` is a
+    same-filesystem atomic rename, and a failure removes it before propagating.
+    """
+    dest = os.path.abspath(dest)
+    if os.path.islink(dest):
+        raise ValueError(f"refusing a symlink destination: {dest}")
+    if os.path.exists(dest):
+        if not force:
+            raise FileExistsError(f"{dest} exists; pass --force to replace it")
+        if os.path.isdir(dest):
+            shutil.rmtree(dest)
+        else:
+            os.remove(dest)
+    parent = os.path.dirname(dest) or "."
+    os.makedirs(parent, exist_ok=True)
+    staging = tempfile.mkdtemp(prefix=".publish-", dir=parent)
+    try:
+        model.save_pretrained(staging)
+        with open(os.path.join(staging, "train_meta.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2, sort_keys=True)
+        os.replace(staging, dest)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return dest
+
+
+def package_versions():
+    """Versions of the packages whose behavior this harness depends on.
+
+    Phase 2: a run that cannot name its transformers/peft/torch versions is not
+    reproducible, and this project has already seen the Trainer step count and
+    the prompt-observability behavior change across versions. Missing metadata
+    is recorded as None, never guessed.
+    """
+    from importlib import metadata
+
+    def version(name):
+        try:
+            return metadata.version(name)
+        except Exception:
+            return None
+
+    import torch
+    import transformers
+
+    return {
+        "transformers": getattr(transformers, "__version__", None),
+        "torch": getattr(torch, "__version__", None),
+        "peft": version("peft"),
+    }
+
+
+def prompt_prefix_ok(prefix, decoder_start_id, language_id, task_id):
+    """Do the ids the decoder was actually fed start with the forced prompt?
+
+    Phase 3: this is the check that does not depend on what ``generate`` returns.
+    ``prompt_language_check`` reads the returned sequence, which newer transformers
+    versions strip; a stripped prompt reads as "unobservable", so the guard has
+    silently been a no-op on those versions. The decoder's own input is the tensor
+    that decides what language is transcribed, so it is the tensor to assert on.
+    """
+    return list(prefix[:3]) == [decoder_start_id, language_id, task_id]
+
+
+def decoder_embedding(model):
+    """The decoder's token embedding, reached through a PeftModel wrapper.
+
+    PeftModel -> LoraModel -> WhisperForConditionalGeneration -> WhisperModel ->
+    WhisperDecoder -> embed_tokens. The encoder embedding is deliberately not
+    matched: it exists, it is not the module that receives the language prompt.
+    """
+    queue, seen = [model], set()
+    for _ in range(8):  # fixed depth: the graph is three wrappers deep, never cyclic
+        if not queue:
+            break
+        node = queue.pop(0)
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        embed = getattr(node, "embed_tokens", None)
+        if embed is not None:
+            return embed
+        for attr in ("base_model", "model", "decoder"):
+            child = getattr(node, attr, None)
+            if child is not None:
+                queue.append(child)
+    return None
+
+
 class GenerateGuard:
     """Wrap ``model.generate`` so every call proves it was language-forced."""
 
@@ -322,31 +449,60 @@ class GenerateGuard:
         self.calls = 0
         self.prompt_verified = False
         self.prompt_observable = False
+        self.prompt_source = None
+        self._armed = False
+        self._decoder_ids = None
         self._original = model.generate
         self.checked = self._make_checked()
+
+    def _capture(self, module, args):
+        """Record the first three ids the decoder embedding received."""
+        if not self._armed or self._decoder_ids is not None or not args:
+            return
+        ids = args[0]
+        if hasattr(ids, "tolist"):
+            ids = ids.tolist()
+        if not ids:
+            return
+        self._decoder_ids = list(ids[0][:3]) if isinstance(ids[0], list) else list(ids[:3])
 
     def _make_checked(self):
         def checked(*args, **kwargs):
             assert_language_kwargs(kwargs, self.language, self.task)
             self.calls += 1
-            out = self._original(*args, **kwargs)
-            if self.language_id is not None and self.task_id is not None:
+            self._armed = True
+            self._decoder_ids = None
+            try:
+                out = self._original(*args, **kwargs)
+            finally:
+                self._armed = False
+            verdict, source = None, None
+            if self._decoder_ids is not None and self.decoder_start_id is not None:
+                source = "decoder_input"
+                verdict = prompt_prefix_ok(
+                    self._decoder_ids, self.decoder_start_id,
+                    self.language_id, self.task_id,
+                )
+            elif self.language_id is not None and self.task_id is not None:
                 sequences = getattr(out, "sequences", out)
                 if hasattr(sequences, "tolist"):
                     sequences = sequences.tolist()
+                source = "output_sequence"
                 verdict = prompt_language_check(
                     sequences, self.decoder_start_id, self.language_id, self.task_id
                 )
-                if verdict is False:
-                    # Phase 2: a kwarg that reached generate but did not reach
-                    # the decoder prompt is the same silent experiment change.
-                    raise RuntimeError(
-                        f"generate() returned a prompt without <|{self.language}|>"
-                        f"/<|{self.task}|>; the language kwarg did not take effect"
-                    )
-                if verdict is not None:
-                    self.prompt_observable = True
-                    self.prompt_verified = self.prompt_verified or verdict
+            if verdict is False:
+                # Phase 2: a kwarg that reached generate but did not reach
+                # the decoder prompt is the same silent experiment change.
+                raise RuntimeError(
+                    f"generate() fed {self._decoder_ids or 'no prompt'} to the decoder "
+                    f"without <|{self.language}|>/<|{self.task}|>; "
+                    "the language kwarg did not take effect"
+                )
+            if verdict is not None:
+                self.prompt_observable = True
+                self.prompt_verified = self.prompt_verified or verdict
+                self.prompt_source = source
             return out
 
         return checked
@@ -355,6 +511,9 @@ class GenerateGuard:
         # Set on the instance: PeftModel forwards unknown attributes to the base
         # model, and prediction_step reads ``model.generate`` at call time.
         model.generate = self.checked
+        embed = decoder_embedding(model)
+        if embed is not None and hasattr(embed, "register_forward_pre_hook"):
+            embed.register_forward_pre_hook(self._capture)
         return self
 
     def report(self):
@@ -364,6 +523,7 @@ class GenerateGuard:
             "generate_calls": self.calls,
             "prompt_tokens_observable": self.prompt_observable,
             "prompt_tokens_verified": self.prompt_verified,
+            "prompt_source": self.prompt_source,
         }
 
 
@@ -459,6 +619,7 @@ def _trainer_class():
             super().__init__(*a, **kw)
             self._force_language = language
             self._force_task = task
+            self._debug_loss_prints = 0
 
         def training_step(self, model, inputs, num_items_in_batch=None):
             # Phase 3/Phase 2: a non-finite loss means the fp16 run has diverged;
@@ -468,6 +629,18 @@ def _trainer_class():
                 raise RuntimeError(
                     "non-finite training loss; refusing to continue (retry with --fp32 "
                     "or a smaller --batch-size)"
+                )
+            if os.environ.get("SPEECHGAP_DEBUG_LOSS") and self._debug_loss_prints < 12:
+                self._debug_loss_prints += 1
+                # This is the per-micro-batch mean returned by training_step.
+                # ``logs["loss"]`` is the sum of these values divided by optimizer
+                # steps, not a per-token cross-entropy, so do not read one as the
+                # other. Printing the raw value is how that difference is pinned.
+                value = float(loss.detach().float().cpu())
+                print(
+                    f"[loss] micro-batch {self._debug_loss_prints} "
+                    f"(global_step {self.state.global_step}): {value:.4f}",
+                    flush=True,
                 )
             return loss
 
@@ -501,6 +674,13 @@ def train(args):
     train_path = os.path.abspath(args.train)
     val_path = os.path.abspath(args.val)
     out_path = os.path.abspath(args.out)
+    # Validate the failed-artifact destination before any manifest or GPU work,
+    # so a typo cannot surface only after a 15-minute run.
+    failed_target = validate_failed_target(
+        getattr(args, "save_failed_adapter", None),
+        out_path=out_path,
+        force=getattr(args, "force", False),
+    )
     audio_root = os.path.dirname(train_path)
 
     train_rows = load_manifest(train_path)
@@ -549,6 +729,7 @@ def train(args):
         "test_speakers": len(test_group_speakers),
         "skipped_too_long": too_long,
         "out": out_path,
+        "save_failed_adapter": failed_target,
     }
     if args.dry_run:
         print(json.dumps(summary, indent=2))
@@ -644,7 +825,6 @@ def train(args):
     parent = os.path.dirname(out_path) or "."
     os.makedirs(parent, exist_ok=True)
     run_dir = tempfile.mkdtemp(prefix=".train-", dir=parent)
-    adapter_tmp = tempfile.mkdtemp(prefix=".adapter-", dir=parent)
     ManifestDataset, Collator = _dataset_classes(processor)
     TrainerClass = _trainer_class()
 
@@ -711,15 +891,7 @@ def train(args):
         forced = guard.report()
         print("\n" + json.dumps({"pilot_gates": gates, "language_forced": forced},
                                 indent=2, ensure_ascii=False))
-        if not gates["ok"]:
-            # Phase 2: fail closed. Nothing is published, so no test cache can be
-            # produced from an adapter that failed the pre-registered gates.
-            raise SystemExit("pilot gates failed: " + "; ".join(gates["failures"]))
-
-        trainer.model.save_pretrained(adapter_tmp)
         history = [h["eval_wer"] for h in trainer.state.log_history if "eval_wer" in h]
-        if not history:
-            raise RuntimeError("no validation WER was recorded; refusing to publish the adapter")
         meta = {
             "base_model": args.model,
             "revision": revision,
@@ -727,6 +899,8 @@ def train(args):
             "language": language_code,
             "language_forced": forced,
             "pilot_gates": gates,
+            "publishable": bool(gates["ok"]),
+            "outcome": "published" if gates["ok"] else "failed_pilot_gates",
             "lora": {"r": args.lora_r, "alpha": args.lora_alpha,
                      "dropout": args.lora_dropout, "targets": list(LORA_TARGETS),
                      "task_type": LORA_TASK_TYPE},
@@ -744,25 +918,30 @@ def train(args):
             "seed": args.seed,
             "device": dev,
             "eval_wer_history": history,
-            "best_val_wer": min(history),
+            "best_val_wer": min(history) if history else None,
             "manifest_sha256": {
                 "train": manifest_sha256(train_path),
                 "val": manifest_sha256(val_path),
                 **( {"test": manifest_sha256(test_path)} if test_rows else {} ),
             },
-            "versions": {
-                "transformers": transformers.__version__,
-                "torch": torch.__version__,
-            },
+            "versions": package_versions(),
         }
-        with open(os.path.join(adapter_tmp, "train_meta.json"), "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2, sort_keys=True)
-        os.replace(adapter_tmp, out_path)
+        if not gates["ok"]:
+            # Phase 2: fail closed on the publish target. The failed artifact is
+            # written only to the operator-named .failed path, and only when the
+            # flag is present; otherwise this run leaves nothing behind.
+            if failed_target:
+                _publish_adapter(trainer.model, failed_target, meta,
+                                 force=getattr(args, "force", False))
+                print(f"wrote failed adapter {failed_target} "
+                      "(pilot gates failed; not a result)")
+            raise SystemExit("pilot gates failed: " + "; ".join(gates["failures"]))
+        if not history:
+            raise RuntimeError("no validation WER was recorded; refusing to publish the adapter")
+        _publish_adapter(trainer.model, out_path, meta, force=getattr(args, "force", False))
         print(f"wrote {out_path} (best val wer {min(history):.2%})")
     finally:
         shutil.rmtree(run_dir, ignore_errors=True)
-        if os.path.isdir(adapter_tmp):
-            shutil.rmtree(adapter_tmp, ignore_errors=True)
     return 0
 
 
@@ -795,6 +974,9 @@ def main(argv=None):
     ap.add_argument("--allow-short", action="store_true")
     ap.add_argument("--fp32", action="store_true")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--save-failed-adapter", default=None, metavar="DIR",
+                    help="write the adapter and train_meta.json here when the pilot "
+                         "gates fail; the path must end in .failed (default: off)")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     return train(a)

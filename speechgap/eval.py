@@ -198,6 +198,40 @@ def _read_partial(part_path, valid_ids):
     return done
 
 
+def _package_version(name):
+    """Installed version of a package, or None.
+
+    Phase 2: the meta sidecar must describe the run even when a package is
+    absent (scoring-only installs do not need peft), so a missing version is
+    recorded as None rather than crashing the eval.
+    """
+    try:
+        from importlib import metadata
+        return metadata.version(name)
+    except Exception:
+        return None
+
+
+def adapter_provenance(adapter):
+    """What a local adapter's own train_meta.json says about it.
+
+    Phase 3: a gate-failed adapter is deliberately still evaluable, so the cache
+    must record that it came from one. This reads the label; it does not refuse.
+    """
+    if not adapter:
+        return {}
+    try:
+        with open(os.path.join(adapter, "train_meta.json"), encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    gates = meta.get("pilot_gates") or {}
+    return {
+        "adapter_publishable": meta.get("publishable"),
+        "adapter_pilot_gates_ok": gates.get("ok"),
+    }
+
+
 def _write_meta(out_path, meta):
     """Sidecar audit trail: what model/device/manifest produced this cache."""
     meta_path = out_path + ".meta.json"
@@ -345,6 +379,10 @@ def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
         "n_resumed": len(done),
         "transformers_version": getattr(__import__("transformers"), "__version__", None),
         "torch_version": getattr(torch, "__version__", None),
+        "peft_version": _package_version("peft"),
+        "adapter_publishable": None,
+        "adapter_pilot_gates_ok": None,
+        **adapter_provenance(adapter),
     }
     _write_meta(out_path, meta)
     print(f"wrote {out_path} ({written} new, {len(done)} resumed)")
