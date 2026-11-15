@@ -1,0 +1,45 @@
+{
+  "english_l2_arctic": {
+    "n_clips": 100,
+    "wer": {
+      "rate": 1.085987261146497,
+      "lo": 0.7146092865232163,
+      "hi": 1.4844486333647502,
+      "n_speakers": 24
+    },
+    "cer": {
+      "rate": 2.3085858585858587,
+      "lo": 1.506103006847276,
+      "hi": 3.117110453648915,
+      "n_speakers": 24
+    },
+    "wer_error_mix": {
+      "sub": 0.3343108504398827,
+      "del": 0.22678396871945258,
+      "ins": 0.4389051808406647
+    },
+    "hallucination_rate": 0.05,
+    "loop_rate": 0.31,
+    "loop_rate_char": 0.31,
+    "loop_rate_word": 0.05,
+    "loop_rate_length": 0.04,
+    "n_looped": 31,
+    "wrong_script_rate": 0.0,
+    "wrong_script_rate_all": 0.0,
+    "diacritic_retention": null,
+    "diacritic_retention_all": null,
+    "n_looped_excluded": 31,
+    "thresholds": {
+      "char_ngram": {
+        "n": 4,
+        "min_repeats": 8
+      },
+      "word_ngram": {
+        "n": 3,
+        "min_repeats": 4
+      },
+      "length_ratio": 10.0,
+      "retention_hyp_cap": 2
+    }
+  }
+}

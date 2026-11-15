@@ -1,0 +1,45 @@
+{
+  "fleurs_yo": {
+    "n_clips": 100,
+    "wer": {
+      "rate": 1.2455277280858676,
+      "lo": 1.0856771960190394,
+      "hi": 1.4345690040196517,
+      "n_speakers": 100
+    },
+    "cer": {
+      "rate": 1.1560660932548665,
+      "lo": 0.9367303129589877,
+      "hi": 1.388255915863278,
+      "n_speakers": 100
+    },
+    "wer_error_mix": {
+      "sub": 0.6104129263913824,
+      "del": 0.11956912028725314,
+      "ins": 0.27001795332136447
+    },
+    "hallucination_rate": 0.11,
+    "loop_rate": 0.26,
+    "loop_rate_char": 0.26,
+    "loop_rate_word": 0.11,
+    "loop_rate_length": 0.0,
+    "n_looped": 26,
+    "wrong_script_rate": 0.0,
+    "wrong_script_rate_all": 0.0,
+    "diacritic_retention": 0.944206008583691,
+    "diacritic_retention_all": 1.0,
+    "n_looped_excluded": 26,
+    "thresholds": {
+      "char_ngram": {
+        "n": 4,
+        "min_repeats": 8
+      },
+      "word_ngram": {
+        "n": 3,
+        "min_repeats": 4
+      },
+      "length_ratio": 10.0,
+      "retention_hyp_cap": 2
+    }
+  }
+}

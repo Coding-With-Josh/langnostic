@@ -1,0 +1,45 @@
+{
+  "yoruba_read": {
+    "n_clips": 300,
+    "wer": {
+      "rate": 1.3157290470723306,
+      "lo": 1.10803324099723,
+      "hi": 1.5463067116610423,
+      "n_speakers": 139
+    },
+    "cer": {
+      "rate": 1.2210526315789474,
+      "lo": 0.8950175778882289,
+      "hi": 1.5713196033562167,
+      "n_speakers": 139
+    },
+    "wer_error_mix": {
+      "sub": 0.5541012216404887,
+      "del": 0.11023851076207097,
+      "ins": 0.3356602675974404
+    },
+    "hallucination_rate": 0.04,
+    "loop_rate": 0.10333333333333333,
+    "loop_rate_char": 0.10333333333333333,
+    "loop_rate_word": 0.04,
+    "loop_rate_length": 0.02,
+    "n_looped": 31,
+    "wrong_script_rate": 0.0,
+    "wrong_script_rate_all": 0.0,
+    "diacritic_retention": 0.872143477003182,
+    "diacritic_retention_all": 0.9910737056873247,
+    "n_looped_excluded": 31,
+    "thresholds": {
+      "char_ngram": {
+        "n": 4,
+        "min_repeats": 8
+      },
+      "word_ngram": {
+        "n": 3,
+        "min_repeats": 4
+      },
+      "length_ratio": 10.0,
+      "retention_hyp_cap": 2
+    }
+  }
+}

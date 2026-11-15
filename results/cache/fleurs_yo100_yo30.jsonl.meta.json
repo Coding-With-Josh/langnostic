@@ -1,0 +1,20 @@
+{
+  "adapter": "checkpoints/yo-30min",
+  "adapter_pilot_gates_ok": true,
+  "adapter_publishable": true,
+  "batch_size": 8,
+  "device": "cuda",
+  "dtype": "float32",
+  "force_language": true,
+  "group": "fleurs_yo",
+  "manifest": "/kaggle/working/langnostic/data/manifest_test.jsonl",
+  "manifest_sha256": "cc26b6b04a6568a6a793677c04ece81ffc4b55e9e798cdffa8bcc142cf8a84ef",
+  "model": "openai/whisper-small",
+  "n_manifest_rows": 100,
+  "n_resumed": 0,
+  "n_transcribed_this_run": 100,
+  "peft_version": "0.21.2",
+  "revision": "973afd24965f72e36ca33b3055d56a652f456b4d",
+  "torch_version": "2.11.0+cu130",
+  "transformers_version": "5.20.2"
+}

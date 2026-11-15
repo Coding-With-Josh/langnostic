@@ -1,0 +1,45 @@
+{
+  "english_read": {
+    "n_clips": 100,
+    "wer": {
+      "rate": 0.10646551724137931,
+      "lo": 0.08408249603384453,
+      "hi": 0.1286061870003476,
+      "n_speakers": 68
+    },
+    "cer": {
+      "rate": 0.0625746577230543,
+      "lo": 0.04395604395604396,
+      "hi": 0.08283722956294468,
+      "n_speakers": 68
+    },
+    "wer_error_mix": {
+      "sub": 0.4898785425101215,
+      "del": 0.3562753036437247,
+      "ins": 0.15384615384615385
+    },
+    "hallucination_rate": 0.0,
+    "loop_rate": 0.0,
+    "loop_rate_char": 0.0,
+    "loop_rate_word": 0.0,
+    "loop_rate_length": 0.0,
+    "n_looped": 0,
+    "wrong_script_rate": 0.0,
+    "wrong_script_rate_all": 0.0,
+    "diacritic_retention": null,
+    "diacritic_retention_all": null,
+    "n_looped_excluded": 0,
+    "thresholds": {
+      "char_ngram": {
+        "n": 4,
+        "min_repeats": 8
+      },
+      "word_ngram": {
+        "n": 3,
+        "min_repeats": 4
+      },
+      "length_ratio": 10.0,
+      "retention_hyp_cap": 2
+    }
+  }
+}
