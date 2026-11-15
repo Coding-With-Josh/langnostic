@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* Host Grotesk (variable) — sans/UI text, opt-in via `font-sans`. */
+  --font-sans: var(--font-host-grotesk);
+
+  /* Galaxie Copernicus (Book) — editorial serif, available as `font-serif`. */
+  --font-serif: var(--font-copernicus);
+
+  --font-mono: var(--font-geist-mono);
+}
+
+@layer base {
+  /* --- Page-load gate ---------------------------------------------------
+     `[data-reveal]` content waits for the loading sequence and is un-hidden
+     when the counter stamps `html[data-revealed]` at 100%.
+
+     Hidden in CSS rather than by a JS render branch on purpose: the
+     stylesheet is render-blocking, so no paint can ever precede the rule
+     (no flash of content), and the content itself stays in the DOM — a
+     failure in the client script can therefore never *destroy* the page.
+
+     `visibility` rather than opacity alone: a hidden-but-painted element
+     would still be clickable and tabbable. */
+  [data-reveal] {
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 500ms ease-out;
+  }
+
+  html[data-revealed] [data-reveal] {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  /* Fail-open #1: no JS at all, so nothing will ever stamp the attribute. */
+  @media (scripting: none) {
+    [data-reveal] {
+      opacity: 1;
+      visibility: visible;
+      transition: none;
+    }
+  }
+
+  /* Fail-open #2: JS is present but the sequence never completes — failed
+     hydration, a thrown render, an interrupted effect, or rAF suspended in a
+     background tab. This recovery is a *declarative* timer on the document
+     timeline, not a `setTimeout`, because the failure it exists for is the
+     one that would also kill a JS timer. It doubles as the no-JS path for
+     browsers without `scripting:` support. The gate is therefore bounded at
+     4s no matter what fails. */
+  @keyframes reveal-fallback {
+    to {
+      opacity: 1;
+      visibility: visible;
+    }
+  }
+
+  [data-reveal] {
+    animation: reveal-fallback 1ms linear 4s forwards;
+  }
+
+  /* The count and the fade are both motion; a reduced-motion visitor gets the
+     page immediately rather than a blank 2s wait. */
+  @media (prefers-reduced-motion: reduce) {
+    [data-reveal] {
+      transition: none;
+    }
+  }
+}
+
+@layer base {
+  /* Base document text is the serif ("main" voice); `font-sans` stays opt-in.
+     Set here rather than through `--default-font-family`: preflight composes
+     that token with its own sans stack as descendants of the same `var()`,
+     which would make a missing font token degrade to the system *sans*. An
+     explicit trailing serif stack keeps the degraded state deterministic, and
+     sitting in `base` means the `font-sans`/`font-serif` utilities still win. */
+  html {
+    font-family: var(--font-copernicus), Georgia, "Times New Roman", serif;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+/* font-family intentionally omitted: preflight sets it on <html> from
+   --default-font-family, and body inherits it. */
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
