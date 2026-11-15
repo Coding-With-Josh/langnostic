@@ -1,3 +1,5 @@
+superseded: written early on saturday before the experiments. the current state is in README.md and the site (https://langnostic.vercel.app). kept as a record of the plan.
+
 # langnostic data plan — verified findings and decision
 
 **Research cut-off:** 2026-11-14. **Project window:** 48 hours. This report synthesizes the supplied verified findings and the project brief/Appendix A. It does not infer fields, speaker counts, audio availability, or license permissions beyond those findings. “Rows/clips” below means the source’s reported utterance, clip, or asset rows; it does not mean people unless explicitly labeled speakers.

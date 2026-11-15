@@ -1,3 +1,5 @@
+superseded: written early on saturday before the experiments. the current state is in README.md and the site (https://langnostic.vercel.app). kept as a record of the plan.
+
 # langnostic: project doc
 
 veritas ai international high school hackathon 2026 | track: ai + languages | solo | working doc for milestones, coordination and memory (not the submission write-up)

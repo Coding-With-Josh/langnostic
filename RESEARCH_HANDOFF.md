@@ -1,3 +1,5 @@
+superseded: written early on saturday before the experiments. the current state is in README.md and the site (https://langnostic.vercel.app). kept as a record of the plan.
+
 # langnostic — single-file research handoff
 
 Generated 2026-11-14. **Upload this one file; no other attachments are needed.**

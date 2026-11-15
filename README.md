@@ -16,11 +16,11 @@ built for the veritas ai international high school hackathon 2026 (track: ai + l
 
 whisper-small is very bad at yoruba zero-shot: 940.0% wer on the 300-clip naija test set and 367.4% on the 100-clip fleurs test set, mostly repetition loops (77% of naija zero-shot hypotheses loop). on english it is fine: 10.6% wer on english read and 8.7% on l2-arctic.
 
-a 30-minute lora adapter cuts yoruba wer on held-out speakers from 940.0% to 131.6% on naija and from 367.4% to 124.6% on fleurs, but mostly by stopping those loops (the naija loop rate falls from 77% to 10.3%). on clips that do not loop, wer is still 92.1% on naija and 95.6% on fleurs. it does not yet transcribe yoruba accurately.
+a 30-minute lora adapter cuts yoruba wer on held-out speakers from 940.0% to 131.6% on naija and from 367.4% to 124.6% on fleurs (the fleurs baseline was run at batch size 1 and the adapter at batch size 8), but mostly by stopping those loops (the naija loop rate falls from 77% to 10.3%). on clips that do not loop, wer is still 92.1% on naija and 95.6% on fleurs. it does not yet transcribe yoruba accurately.
 
 the adapter costs english: 17.6% wer on english read (from 10.6%) and 108.6% on accented l2-arctic english (from 8.7%).
 
-h7 proxy: stripping tone marks and underdots removes only a minority of word errors: 13.8% on the naija adapter, 14.5% on the fleurs adapter, and no more than 23.7% on any cache or clip set. it does not check whether the marks that are present are correct.
+h7 proxy: stripping tone marks and underdots removes only a minority of word errors: 13.8% of all-clip errors on the naija adapter and 14.5% on the fleurs adapter, and 21.0% and 23.7% on the non-looped clips; no cache or clip set exceeds 23.7%. it does not check whether the marks that are present are correct.
 
 these are descriptive: one seed per run, no confirmatory claim, and fleurs has no speaker ids, so its intervals are clip-level and optimistic. every number above comes from the committed reports in `results/`; intervals, the deviations log and the rest of the report are on the [site](https://langnostic.vercel.app).
 
@@ -62,7 +62,7 @@ PYTHONPATH=. python -m speechgap.data build --dry-run \
 
 ## compute
 
-model work runs in a free **colab t4** (kaggle t4 as backup): dataset download and decode, whisper transcription, and lora training. the laptop only runs tests, scores cached jsonl, and develops the gradio demo. `speechgap.eval --device cuda` refuses to fall back silently if cuda is absent.
+model work runs on a free **kaggle t4** (colab t4 was the earlier machine): dataset download and decode, whisper transcription, and lora training. the laptop only runs tests, scores cached jsonl, and builds the static site (no gradio). `speechgap.eval --device cuda` refuses to fall back silently if cuda is absent.
 
 the cache is the only artifact that comes back from colab: `results/cache/*.jsonl` plus its `.meta.json` sidecar. audio and manifests stay in the colab session (or drive); they are regenerable and git-ignored.
 
