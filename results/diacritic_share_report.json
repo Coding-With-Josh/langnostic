@@ -1,0 +1,286 @@
+{
+  "method": {
+    "share": "(errors_with_marks - errors_stripped) / errors_with_marks",
+    "errors": "word substitutions + deletions + insertions",
+    "strip": "NFD, remove combining marks, NFC, on both sides",
+    "bootstrap": {
+      "n_boot": 2000,
+      "seed": 0,
+      "alpha": 0.05,
+      "cluster": "speaker"
+    },
+    "caveat": "proxy: does not check whether present marks are correct"
+  },
+  "caches": {
+    "naija_test_yo30": {
+      "path": "results/cache/naija_test_yo30.jsonl",
+      "group": "yoruba_read",
+      "all": {
+        "n_clips": 300,
+        "non_looped": false,
+        "reference_words": 2613,
+        "errors_with_marks": 3438,
+        "errors_stripped": 2963,
+        "wer_with_marks": {
+          "rate": 1.3157290470723306,
+          "lo": 1.10803324099723,
+          "hi": 1.5463067116610423,
+          "n_speakers": 139
+        },
+        "wer_stripped": {
+          "rate": 1.133945656333716,
+          "lo": 0.9168421052631579,
+          "hi": 1.3689037098791164,
+          "n_speakers": 139
+        },
+        "share_vanished": {
+          "rate": 0.13816172193135545,
+          "lo": 0.11102423768569195,
+          "hi": 0.17207514944491886,
+          "n_speakers": 139
+        }
+      },
+      "non_looped": {
+        "n_clips": 269,
+        "non_looped": true,
+        "reference_words": 2309,
+        "errors_with_marks": 2126,
+        "errors_stripped": 1679,
+        "wer_with_marks": {
+          "rate": 0.920744911216977,
+          "lo": 0.9005076142131979,
+          "hi": 0.9431363838294091,
+          "n_speakers": 132
+        },
+        "wer_stripped": {
+          "rate": 0.7271546123863144,
+          "lo": 0.7028544688816097,
+          "hi": 0.7542879936178699,
+          "n_speakers": 132
+        },
+        "share_vanished": {
+          "rate": 0.21025399811853246,
+          "lo": 0.18824065633546036,
+          "hi": 0.23311655827913957,
+          "n_speakers": 132
+        }
+      }
+    },
+    "naija_test_zeroshot": {
+      "path": "results/cache/naija_test_zeroshot.jsonl",
+      "group": "yoruba_read",
+      "all": {
+        "n_clips": 300,
+        "non_looped": false,
+        "reference_words": 2613,
+        "errors_with_marks": 24562,
+        "errors_stripped": 22804,
+        "wer_with_marks": {
+          "rate": 9.399923459624953,
+          "lo": 8.25603318250377,
+          "hi": 10.598650385604113,
+          "n_speakers": 139
+        },
+        "wer_stripped": {
+          "rate": 8.727133562954458,
+          "lo": 7.620481927710843,
+          "hi": 9.961647727272727,
+          "n_speakers": 139
+        },
+        "share_vanished": {
+          "rate": 0.07157397606058138,
+          "lo": 0.044156876099665135,
+          "hi": 0.1006899525657611,
+          "n_speakers": 139
+        }
+      },
+      "non_looped": {
+        "n_clips": 69,
+        "non_looped": true,
+        "reference_words": 609,
+        "errors_with_marks": 639,
+        "errors_stripped": 589,
+        "wer_with_marks": {
+          "rate": 1.0492610837438423,
+          "lo": 1.0178571428571428,
+          "hi": 1.086071987480438,
+          "n_speakers": 43
+        },
+        "wer_stripped": {
+          "rate": 0.9671592775041051,
+          "lo": 0.9201596806387226,
+          "hi": 1.0145454545454546,
+          "n_speakers": 43
+        },
+        "share_vanished": {
+          "rate": 0.0782472613458529,
+          "lo": 0.05505952380952381,
+          "hi": 0.105,
+          "n_speakers": 43
+        }
+      }
+    },
+    "fleurs_zero_shot": {
+      "path": "results/cache/fleurs_zero_shot.jsonl",
+      "group": "yoruba_read",
+      "all": {
+        "n_clips": 100,
+        "non_looped": false,
+        "reference_words": 2236,
+        "errors_with_marks": 8214,
+        "errors_stripped": 7972,
+        "wer_with_marks": {
+          "rate": 3.6735241502683365,
+          "lo": 3.078587196467991,
+          "hi": 4.279156908665105,
+          "n_speakers": 100
+        },
+        "wer_stripped": {
+          "rate": 3.565295169946333,
+          "lo": 2.9602098819414078,
+          "hi": 4.190151145782545,
+          "n_speakers": 100
+        },
+        "share_vanished": {
+          "rate": 0.02946189432675919,
+          "lo": 0.009613283810356128,
+          "hi": 0.06752646307336659,
+          "n_speakers": 100
+        }
+      },
+      "non_looped": {
+        "n_clips": 36,
+        "non_looped": true,
+        "reference_words": 814,
+        "errors_with_marks": 882,
+        "errors_stripped": 776,
+        "wer_with_marks": {
+          "rate": 1.0835380835380835,
+          "lo": 1.023109243697479,
+          "hi": 1.1576158940397352,
+          "n_speakers": 36
+        },
+        "wer_stripped": {
+          "rate": 0.9533169533169533,
+          "lo": 0.8894736842105263,
+          "hi": 1.030808729139923,
+          "n_speakers": 36
+        },
+        "share_vanished": {
+          "rate": 0.12018140589569161,
+          "lo": 0.09328782707622298,
+          "hi": 0.14588235294117646,
+          "n_speakers": 36
+        }
+      }
+    },
+    "fleurs_yo100_yo30": {
+      "path": "results/cache/fleurs_yo100_yo30.jsonl",
+      "group": "fleurs_yo",
+      "all": {
+        "n_clips": 100,
+        "non_looped": false,
+        "reference_words": 2236,
+        "errors_with_marks": 2785,
+        "errors_stripped": 2381,
+        "wer_with_marks": {
+          "rate": 1.2455277280858676,
+          "lo": 1.0856771960190394,
+          "hi": 1.4345690040196517,
+          "n_speakers": 100
+        },
+        "wer_stripped": {
+          "rate": 1.0648479427549196,
+          "lo": 0.8911079410366144,
+          "hi": 1.2567889471176752,
+          "n_speakers": 100
+        },
+        "share_vanished": {
+          "rate": 0.1450628366247756,
+          "lo": 0.11430356027482823,
+          "hi": 0.18286852589641434,
+          "n_speakers": 100
+        }
+      },
+      "non_looped": {
+        "n_clips": 74,
+        "non_looped": true,
+        "reference_words": 1596,
+        "errors_with_marks": 1525,
+        "errors_stripped": 1163,
+        "wer_with_marks": {
+          "rate": 0.9555137844611529,
+          "lo": 0.92,
+          "hi": 0.9980903882877148,
+          "n_speakers": 74
+        },
+        "wer_stripped": {
+          "rate": 0.7286967418546366,
+          "lo": 0.6809492419248517,
+          "hi": 0.7796810395747195,
+          "n_speakers": 74
+        },
+        "share_vanished": {
+          "rate": 0.23737704918032787,
+          "lo": 0.20442708333333334,
+          "hi": 0.2709190672153635,
+          "n_speakers": 74
+        }
+      }
+    },
+    "fleurs_yo_autodetect": {
+      "path": "results/cache/fleurs_yo_autodetect.jsonl",
+      "group": "fleurs_yo",
+      "all": {
+        "n_clips": 100,
+        "non_looped": false,
+        "reference_words": 2236,
+        "errors_with_marks": 7424,
+        "errors_stripped": 7301,
+        "wer_with_marks": {
+          "rate": 3.3202146690518783,
+          "lo": 2.722634103794156,
+          "hi": 3.908294930875576,
+          "n_speakers": 100
+        },
+        "wer_stripped": {
+          "rate": 3.26520572450805,
+          "lo": 2.6573991031390136,
+          "hi": 3.859475507174666,
+          "n_speakers": 100
+        },
+        "share_vanished": {
+          "rate": 0.016567887931034482,
+          "lo": 0.010325951729285892,
+          "hi": 0.025513698630136986,
+          "n_speakers": 100
+        }
+      },
+      "non_looped": {
+        "n_clips": 44,
+        "non_looped": true,
+        "reference_words": 910,
+        "errors_with_marks": 957,
+        "errors_stripped": 847,
+        "wer_with_marks": {
+          "rate": 1.0516483516483517,
+          "lo": 0.9953542392566783,
+          "hi": 1.1130890052356022,
+          "n_speakers": 44
+        },
+        "wer_stripped": {
+          "rate": 0.9307692307692308,
+          "lo": 0.8734030197444832,
+          "hi": 0.9917780061664954,
+          "n_speakers": 44
+        },
+        "share_vanished": {
+          "rate": 0.11494252873563218,
+          "lo": 0.0893909626719057,
+          "hi": 0.14102564102564102,
+          "n_speakers": 44
+        }
+      }
+    }
+  }
+}
