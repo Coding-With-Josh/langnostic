@@ -131,6 +131,29 @@ def test_select_rows_refuses_an_empty_selection():
             raise AssertionError(f"must refuse {kwargs}: an empty run would score as nan")
 
 
+def test_pipe_call_requests_language_only_on_the_auto_detect_path():
+    from speechgap.eval import _pipe_call_kwargs
+
+    forced = _pipe_call_kwargs("yo", True)
+    assert forced["return_language"] is False
+    assert forced["generate_kwargs"] == {"task": "transcribe", "language": "yo"}
+    auto = _pipe_call_kwargs(None, False)
+    assert auto["return_language"] is True
+    assert auto["generate_kwargs"] == {"task": "transcribe"}
+
+
+def test_cache_record_keeps_the_detected_language_then_the_forced_one():
+    from speechgap.eval import _cache_record
+
+    row = _rec(0)
+    detected = _cache_record(row, {"text": "bawo", "language": "en"}, "yo")
+    assert detected["language"] == "en"
+    assert detected["hyp"] == "bawo"
+    assert set(detected) == {"utt_id", "speaker", "group", "ref", "hyp", "language"}
+    assert _cache_record(row, {"text": "bawo"}, "yo")["language"] == "yo"
+    assert _cache_record(row, {"text": "x", "language": None}, None)["language"] is None
+
+
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, ".")

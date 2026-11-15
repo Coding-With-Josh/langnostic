@@ -243,6 +243,28 @@ def _write_meta(out_path, meta):
     os.replace(tmp, meta_path)
 
 
+def _pipe_call_kwargs(lang, force_language):
+    """Pipeline kwargs for one language bucket.
+
+    ``return_language`` is requested only on the auto-detect path: a forced run
+    keeps the pre-existing call shape, so its output cannot change. The detected
+    code is recorded per row because the sidecar only knows the forced bucket.
+    """
+    generate_kwargs = {"task": "transcribe"}
+    if lang:
+        generate_kwargs["language"] = lang
+    return {"generate_kwargs": generate_kwargs,
+            "return_language": not force_language}
+
+
+def _cache_record(row, pred, lang):
+    """One cache row; language is the detected code, else the forced bucket."""
+    rec = {k: row[k] for k in ("utt_id", "speaker", "group", "ref")}
+    rec["hyp"] = pred["text"]
+    rec["language"] = pred.get("language") or lang
+    return rec
+
+
 def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
                device=None, force_language=True, force=False, resume=False,
                batch_size=None, revision=None, limit=None, fp32=False, group=None):
@@ -344,10 +366,8 @@ def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
             for start in range(0, len(bucket), batch_size):
                 chunk = bucket[start:start + batch_size]
                 paths = [pending_paths[r["utt_id"]] for r in chunk]
-                kwargs = {"task": "transcribe"}
-                if lang:
-                    kwargs["language"] = lang
-                preds = pipe(paths, batch_size=len(paths), generate_kwargs=kwargs)
+                preds = pipe(paths, batch_size=len(paths),
+                             **_pipe_call_kwargs(lang, force_language))
                 if isinstance(preds, dict):
                     preds = [preds]
                 if len(preds) != len(chunk):
@@ -355,8 +375,7 @@ def transcribe(manifest, out_path, model_name=DEFAULT_MODEL, adapter=None,
                         f"expected {len(chunk)} transcripts, got {len(preds)}"
                     )
                 for r, pred in zip(chunk, preds):
-                    rec = {k: r[k] for k in ("utt_id", "speaker", "group", "ref")}
-                    rec["hyp"] = pred["text"]
+                    rec = _cache_record(r, pred, lang)
                     out.write(json.dumps(rec, ensure_ascii=False) + "\n")
                     written += 1
                 # Flush per batch: a Colab disconnect must not lose the batch.
