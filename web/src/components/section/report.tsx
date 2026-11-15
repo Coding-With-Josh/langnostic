@@ -33,9 +33,12 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <section id={id} className="scroll-mt-16 border-t border-foreground/10">
+    <section
+      id={id}
+      className="scroll-mt-16 border-t border-black/10 text-black"
+    >
       <div className="mx-auto grid max-w-5xl gap-4 px-6 py-14 sm:grid-cols-[11rem_1fr] sm:gap-10">
-        <h2 className="font-sans text-sm text-foreground/50">{title}</h2>
+        <h2 className="font-sans text-sm text-black/50">{title}</h2>
         <div className="flex min-w-0 flex-col gap-6">{children}</div>
       </div>
     </section>
@@ -47,7 +50,7 @@ function Table({ head, rows }: { head: string[]; rows: string[][] }) {
     <div className="overflow-x-auto">
       <table className="w-full min-w-[34rem] border-collapse text-left font-sans text-sm tabular-nums">
         <thead>
-          <tr className="border-b border-foreground/20 text-foreground/50">
+          <tr className="border-b border-black/20 text-black/50">
             {head.map((h) => (
               <th key={h} className="py-2 pr-4 font-normal">
                 {h}
@@ -57,7 +60,7 @@ function Table({ head, rows }: { head: string[]; rows: string[][] }) {
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i} className="border-b border-foreground/10 align-top">
+            <tr key={i} className="border-b border-black/10 align-top">
               {r.map((c, j) => (
                 <td key={j} className="py-3 pr-4 leading-relaxed">
                   {c}
@@ -85,14 +88,14 @@ function Dot({ offset = "mt-[0.7rem]" }: { offset?: string }) {
   return (
     <span
       aria-hidden="true"
-      className={`${offset} h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/30`}
+      className={`${offset} h-1.5 w-1.5 shrink-0 rounded-full bg-black/30`}
     />
   );
 }
 
 function Rows({ items }: { items: [string, string][] }) {
   return (
-    <ul className="divide-y divide-foreground/10 border-y border-foreground/10">
+    <ul className="divide-y divide-black/10 border-y border-black/10">
       {items.map(([title, text]) => (
         <li key={title} className="grid grid-cols-[1.25rem_1fr] gap-3 py-4">
           {/* `mt-[0.45rem]` centres the 6px dot on the `text-sm` title's first
@@ -100,7 +103,7 @@ function Rows({ items }: { items: [string, string][] }) {
           <Dot offset="mt-[0.45rem]" />
           <div>
             <p className="font-sans text-sm font-medium">{title}</p>
-            <p className="mt-1 max-w-[62ch] leading-relaxed text-foreground/70">
+            <p className="mt-1 max-w-[62ch] leading-relaxed text-black/70">
               {text}
             </p>
           </div>
@@ -120,7 +123,7 @@ function Bullets({
   dotOffset?: string;
 }) {
   return (
-    <ul className="divide-y divide-foreground/10 border-y border-foreground/10">
+    <ul className="divide-y divide-black/10 border-y border-black/10">
       {items.map((text) => (
         <li key={text} className="grid grid-cols-[1.25rem_1fr] gap-3 py-4">
           <Dot offset={dotOffset} />
@@ -174,7 +177,9 @@ export default function Report() {
       </Section>
 
       <Section id="results" title="results">
-        <p className={prose}>i will put the numbers here once i freeze the runs.</p>
+        <p className={prose}>
+          i will put the numbers here once i freeze the runs.
+        </p>
       </Section>
 
       <Section id="deviations" title="deviations">
@@ -189,16 +194,13 @@ export default function Report() {
       </Section>
 
       <Section id="limitations" title="limitations">
-        <Bullets
-          items={limitations}
-          textClassName={`${prose} text-foreground/80`}
-        />
+        <Bullets items={limitations} textClassName={`${prose} text-black/80`} />
       </Section>
 
       <Section id="sources" title="sources">
         <Bullets
           items={sources}
-          textClassName="font-sans text-sm text-foreground/80"
+          textClassName="font-sans text-sm text-black/80"
           dotOffset="mt-[0.45rem]"
         />
         <p className={prose}>
