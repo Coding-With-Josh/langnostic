@@ -110,13 +110,53 @@ def paired_bootstrap_diff(counts_a, counts_b, speakers, n_boot=2000, alpha=0.05,
     return {"diff": point, "lo": lo, "hi": hi, "n_speakers": len(groups)}
 
 
-def looks_like_loop(text, n=3, min_repeats=4):
-    """Crude hallucination check: the same n-gram repeated many times."""
+# One source of truth for the loop rule, shared by the report and the pilot's
+# degenerate check. Changing any of these is a deviations-log change.
+WORD_LOOP_N = 3
+WORD_LOOP_MIN_REPEATS = 4
+CHAR_LOOP_N = 4
+CHAR_LOOP_MIN_REPEATS = 8
+LOOP_RATIO = 10.0
+
+
+def looks_like_loop(text, n=WORD_LOOP_N, min_repeats=WORD_LOOP_MIN_REPEATS):
+    """Crude hallucination check: the same word n-gram repeated many times."""
     toks = text.split()
     if len(toks) < n * min_repeats:
         return False
     grams = Counter(tuple(toks[i:i + n]) for i in range(len(toks) - n + 1))
     return max(grams.values()) >= min_repeats
+
+
+def char_loop(text, n=CHAR_LOOP_N, min_repeats=CHAR_LOOP_MIN_REPEATS):
+    """True when one character n-gram repeats at least ``min_repeats`` times.
+
+    The word detector cannot see a space-free loop: ``text.split()`` returns one
+    token, so no word n-gram exists and the 15-minute run's ``ḍḍḍḍ...`` output
+    went unflagged. Character n-grams see the repetition whether or not the
+    output contains spaces. The shortest text that can hold ``min_repeats``
+    overlapping copies of an n-gram is ``n + min_repeats - 1`` characters.
+    """
+    if len(text) < n + min_repeats - 1:
+        return False
+    grams = Counter(text[i:i + n] for i in range(len(text) - n + 1))
+    return max(grams.values()) >= min_repeats
+
+
+def loop_flags(ref, hyp, ratio=LOOP_RATIO):
+    """Which loop tests fire for one hypothesis, and whether any does.
+
+    All three tests are reported separately because they fail differently: a
+    character loop is the space-free collapse, a word loop is repeated phrases,
+    and the length test catches an output that never stops but never repeats an
+    exact n-gram. ``any`` is the single definition used to exclude a hypothesis
+    from the fair diacritic-retention score.
+    """
+    char = char_loop(hyp)
+    word = looks_like_loop(hyp)
+    length = len(hyp) > ratio * max(len(ref), 1)
+    return {"char": char, "word": word, "length": length,
+            "any": char or word or length}
 
 
 def is_hallucination(ref, hyp, ratio=2.0):

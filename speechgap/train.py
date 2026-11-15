@@ -43,9 +43,9 @@ from itertools import combinations
 from .eval import (DEFAULT_MODEL, DEFAULT_REVISION, load_manifest,
                    manifest_sha256, resolve_device)
 from .languages import resolve_language
-from .metrics import rate, utt_counts
+from .metrics import LOOP_RATIO, loop_flags, rate, utt_counts
 from .normalize import normalize
-from .report import diacritic_retention, truncate_hyp, wrong_script_rate
+from .report import diacritic_retention_detail, truncate_hyp, wrong_script_rate
 
 # Fixed analysis-plan defaults. Changing these is a deviations-log change.
 LORA_TARGETS = ("q_proj", "v_proj")
@@ -69,7 +69,8 @@ PILOT_EXAMPLES = 3
 # A token loop is not "bad ASR", it is a score that stops meaning anything:
 # WER fills up with insertions. Ten times the reference length is far outside
 # anything observed in a healthy run, including the 367% WER yoruba baseline.
-LOOP_RATIO = 10.0
+# The value lives in metrics so the report's loop rule cannot drift from this
+# gate; changing it is still a deviations-log change.
 
 # A gate-failed adapter may still be evaluated, but its directory name must say
 # so. The suffix is the label that keeps it from being read as a result.
@@ -228,7 +229,12 @@ def pilot_gates(refs, hyps):
             f"{len(hyps)} hypotheses"
         )
     val_wer = wer_of(refs, hyps)
+    # Gate input is unchanged: every hypothesis, loops included, exactly as
+    # pre-registered. The non-looped value below is reported alongside it.
     wrong_script = wrong_script_rate(" ".join(hyps))
+    flags = [loop_flags(ref, hyp) for ref, hyp in zip(refs, hyps)]
+    nonlooped_hyps = [hyp for hyp, flag in zip(hyps, flags) if not flag["any"]]
+    retention = diacritic_retention_detail(refs, hyps)
     reasons = degenerate_reasons(refs, hyps)
     failures = list(reasons)
     if val_wer > PILOT_MAX_VAL_WER:
@@ -241,7 +247,12 @@ def pilot_gates(refs, hyps):
         "n_clips": len(hyps),
         "val_wer": val_wer,
         "wrong_script_rate": wrong_script,
-        "diacritic_retention": diacritic_retention(refs, hyps),
+        "wrong_script_rate_nonlooped": (wrong_script_rate(" ".join(nonlooped_hyps))
+                                        if nonlooped_hyps else None),
+        "diacritic_retention": retention["retention"],
+        "diacritic_retention_all": retention["retention_all"],
+        "n_looped": sum(flag["any"] for flag in flags),
+        "n_looped_excluded": retention["n_looped_excluded"],
         "degenerate": reasons,
         "failures": failures,
         "ok": not failures,

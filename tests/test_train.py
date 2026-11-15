@@ -180,6 +180,16 @@ def test_pilot_gates_fail_on_wrong_script_without_calling_it_degenerate():
     assert gates["degenerate"] == []
 
 
+def test_pilot_gates_keep_all_hyps_wrong_script_rule():
+    refs = ["one two three four five six seven eight"] * 2
+    hyps = ["កខគ" * 20, refs[1]]
+    gates = pilot_gates(refs, hyps)
+    # The gate still uses every hypothesis, exactly as pre-registered.
+    assert not gates["ok"] and "wrong script" in " ".join(gates["failures"])
+    assert gates["wrong_script_rate_nonlooped"] == 0.0
+    assert gates["n_looped"] == 1 and gates["n_looped_excluded"] == 1
+
+
 def test_example_lines_cap_at_three_and_mark_loops():
     refs = ["a", "b", "c", "d"]
     hyps = ["a", "b", "c", "x" * 5000]
