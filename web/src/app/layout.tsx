@@ -19,19 +19,19 @@ import "./globals.css";
  * fallback face (size-adjust/ascent-override) from Copernicus' real metrics.
  * Leaving the default ("Arial") would match a sans and cause a reflow on swap.
  */
-const copernicus = localFont({
-  src: [
-    {
-      path: "./fonts/GalaxieCopernicus-Book.woff2",
-      weight: "400",
-      style: "normal",
-    },
-  ],
-  variable: "--font-copernicus",
-  display: "swap",
-  fallback: ["Georgia", "Times New Roman", "serif"],
-  adjustFontFallback: "Times New Roman",
-});
+// const copernicus = localFont({
+//   src: [
+//     {
+//       path: "./fonts/GalaxieCopernicus-Book.woff2",
+//       weight: "400",
+//       style: "normal",
+//     },
+//   ],
+//   variable: "--font-copernicus",
+//   display: "swap",
+//   fallback: ["Georgia", "Times New Roman", "serif"],
+//   adjustFontFallback: "Times New Roman",
+// });
 
 /**
  * Host Grotesk — UI/sans voice (`font-sans`). Variable font (300–800), so no
