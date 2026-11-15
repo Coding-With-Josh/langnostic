@@ -109,11 +109,13 @@ export function LoadingCounter() {
       // Decorative: it is not reporting real work, so it is hidden from
       // assistive tech rather than announced as a progress value.
       aria-hidden="true"
-      className={`pointer-events-none select-none transition-[transform,opacity] duration-500 ease-out motion-reduce:transition-none ${
-        phase === "exiting"
-          ? "-translate-y-[0.75em] opacity-0"
-          : "translate-y-0 opacity-100"
+      className={`pointer-events-none select-none transition-transform transition-opacity duration-500 ease-out motion-reduce:transition-none ${
+        phase === "exiting" ? "opacity-0" : "opacity-100"
       }`}
+      style={{
+        transform:
+          phase === "exiting" ? "translateY(-0.75em)" : "translateY(0)",
+      }}
     >
       <NumberFlow
         // Percent format takes 0–1, hence the division. Seeded at 0 on mount,
