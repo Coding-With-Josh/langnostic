@@ -352,13 +352,52 @@ def validate_failed_target(path, out_path=None, force=False):
     return target
 
 
-def _publish_adapter(model, dest, meta, force=False):
+def _trainer_metrics(train_result, eval_result):
+    """Wall-clock fields from the trainer, omitting any it did not report."""
+    train_metrics = getattr(train_result, "metrics", None)
+    if not isinstance(train_metrics, dict):
+        train_metrics = train_result if isinstance(train_result, dict) else {}
+    eval_metrics = eval_result if isinstance(eval_result, dict) else getattr(
+        eval_result, "metrics", None)
+    if not isinstance(eval_metrics, dict):
+        eval_metrics = {}
+    out = {}
+    for key in ("train_runtime", "train_steps_per_second"):
+        if train_metrics.get(key) is not None:
+            out[key] = train_metrics[key]
+    if eval_metrics.get("eval_runtime") is not None:
+        out["eval_runtime"] = eval_metrics["eval_runtime"]
+    return out
+
+
+def _val_prediction_rows(val_rows, refs, hyps):
+    """Cache-schema rows for the final validation pass, or a hard error.
+
+    Threat (Phase 3): zipping predictions against a differently ordered split
+    would attach a hypothesis to the wrong reference. Length is the only cheap
+    invariant here, so a mismatch refuses to write anything.
+    """
+    if len(refs) != len(val_rows) or len(hyps) != len(val_rows):
+        raise RuntimeError(
+            f"validation predictions ({len(refs)} refs, {len(hyps)} hyps) do not "
+            f"match the {len(val_rows)} validation rows"
+        )
+    return [
+        {"utt_id": r["utt_id"], "speaker": r["speaker"], "group": r["group"],
+         "ref": ref, "hyp": hyp}
+        for r, ref, hyp in zip(val_rows, refs, hyps)
+    ]
+
+
+def _publish_adapter(model, dest, meta, force=False, val_predictions=None):
     """Write one adapter directory atomically, or write nothing.
 
     Threat (Phase 3): a crash between ``save_pretrained`` and the final rename
     would leave a half-written directory that still looks like an adapter. The
     staging dir lives in the destination's own parent so ``os.replace`` is a
     same-filesystem atomic rename, and a failure removes it before propagating.
+    ``val_predictions`` is written inside that staging dir, so the validation
+    rows and the weights become visible in the same rename.
     """
     dest = os.path.abspath(dest)
     if os.path.islink(dest):
@@ -377,6 +416,11 @@ def _publish_adapter(model, dest, meta, force=False):
         model.save_pretrained(staging)
         with open(os.path.join(staging, "train_meta.json"), "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2, sort_keys=True)
+        if val_predictions is not None:
+            with open(os.path.join(staging, "val_predictions.jsonl"), "w",
+                      encoding="utf-8") as f:
+                for row in val_predictions:
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
         os.replace(staging, dest)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -877,13 +921,13 @@ def train(args):
     )
 
     try:
-        trainer.train()
+        train_result = trainer.train()
         # Phase 3: the guard must be on the object the final evaluation calls.
         # If load_best_model_at_end swapped it, the old wrapper is gone and the
         # assertion would be vacuous; rebuilding closes that and re-covers the
         # published weights rather than the last epoch's.
         guard = new_guard(trainer.model)
-        trainer.evaluate()
+        eval_result = trainer.evaluate()
         refs = last_eval.get("ref", [])
         hyps = last_eval.get("hyp", [])
         if not hyps:
@@ -894,6 +938,8 @@ def train(args):
                 "generate() never ran through the language guard; "
                 "cannot confirm the forced language reached the model"
             )
+
+        val_rows = _val_prediction_rows(val_subset, refs, hyps)
 
         print("\n--- validation examples: read these before quoting the number ---")
         for line in example_lines(refs, hyps, [r["utt_id"] for r in val_subset]):
@@ -937,19 +983,23 @@ def train(args):
             },
             "versions": package_versions(),
         }
+        meta.update(_trainer_metrics(train_result, eval_result))
         if not gates["ok"]:
             # Phase 2: fail closed on the publish target. The failed artifact is
             # written only to the operator-named .failed path, and only when the
             # flag is present; otherwise this run leaves nothing behind.
             if failed_target:
                 _publish_adapter(trainer.model, failed_target, meta,
-                                 force=getattr(args, "force", False))
+                                 force=getattr(args, "force", False),
+                                 val_predictions=val_rows)
                 print(f"wrote failed adapter {failed_target} "
                       "(pilot gates failed; not a result)")
             raise SystemExit("pilot gates failed: " + "; ".join(gates["failures"]))
         if not history:
             raise RuntimeError("no validation WER was recorded; refusing to publish the adapter")
-        _publish_adapter(trainer.model, out_path, meta, force=getattr(args, "force", False))
+        _publish_adapter(trainer.model, out_path, meta,
+                         force=getattr(args, "force", False),
+                         val_predictions=val_rows)
         print(f"wrote {out_path} (best val wer {min(history):.2%})")
     finally:
         shutil.rmtree(run_dir, ignore_errors=True)

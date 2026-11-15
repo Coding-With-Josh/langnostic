@@ -1,8 +1,10 @@
 """Stdlib-only tests for the LoRA trainer's pre-flight guards."""
+import json
 import os
 import tempfile
 
-from speechgap.train import (GenerateGuard, _publish_adapter, assert_language_kwargs,
+from speechgap.train import (GenerateGuard, _publish_adapter, _trainer_metrics,
+                             _val_prediction_rows, assert_language_kwargs,
                              build_lora_config, cap_rows, check_disjoint,
                              check_homogeneous, decoder_embedding,
                              degenerate_reasons, example_lines,
@@ -392,6 +394,51 @@ def test_package_versions_names_the_three_packages():
     assert isinstance(versions["transformers"], str)
     assert isinstance(versions["torch"], str)
     assert versions["peft"] is None or isinstance(versions["peft"], str)
+
+
+def test_trainer_metrics_keeps_only_the_reported_wall_clock_fields():
+    out = _trainer_metrics(
+        {"train_runtime": 12.5, "train_steps_per_second": 3.2},
+        {"eval_runtime": 4.1, "eval_samples_per_second": 24.0},
+    )
+    assert out == {"train_runtime": 12.5, "train_steps_per_second": 3.2,
+                   "eval_runtime": 4.1}
+    assert _trainer_metrics({}, {}) == {}
+
+    class Result:
+        metrics = {"train_runtime": 1.0}
+
+    assert _trainer_metrics(Result(), object()) == {"train_runtime": 1.0}
+
+
+def test_val_prediction_rows_keeps_the_cache_schema_and_refuses_a_mismatch():
+    rows = [_row(0), _row(1)]
+    got = _val_prediction_rows(rows, ["a", "b"], ["x", "y"])
+    assert got[0] == {"utt_id": "u0", "speaker": "s0",
+                      "group": "yoruba_read", "ref": "a", "hyp": "x"}
+    assert [g["utt_id"] for g in got] == ["u0", "u1"]
+    try:
+        _val_prediction_rows(rows, ["a"], ["x", "y"])
+    except RuntimeError as e:
+        assert "do not match" in str(e)
+    else:
+        raise AssertionError("a length mismatch must refuse to write")
+
+
+def test_publish_adapter_writes_val_predictions_into_the_staging_dir():
+    with tempfile.TemporaryDirectory() as d:
+        preds = [{"utt_id": "u0", "speaker": "s0", "group": "yoruba_read",
+                  "ref": "a", "hyp": "b"}]
+        dest = os.path.join(d, "yo30")
+        _publish_adapter(_SavingModel(), dest, {"publishable": True},
+                         val_predictions=preds)
+        path = os.path.join(dest, "val_predictions.jsonl")
+        assert os.path.isfile(path)
+        with open(path, encoding="utf-8") as f:
+            assert [json.loads(line) for line in f if line.strip()] == preds
+        dest2 = os.path.join(d, "yo30b")
+        _publish_adapter(_SavingModel(), dest2, {})
+        assert not os.path.exists(os.path.join(dest2, "val_predictions.jsonl"))
 
 
 if __name__ == "__main__":
