@@ -4,17 +4,17 @@ export const plan = `${repo}/blob/main/ANALYSIS_PLAN.md`;
 export const hypotheses: [string, string][] = [
   ["h1", "i expect error to rise as whisper's training-data share for a language falls. descriptive only."],
   ["h2", "i expect the gap between accents to be smaller than the gap between languages."],
-  ["h3", "i expect the adapter to close a large share of the yoruba gap."],
+  ["h3", "i expect the adapter to close a large share of the Yoruba gap."],
   ["h4", "i expect the gain to cost something on other speech."],
   ["h5", "i expect most low-resource errors to be inserted or repeated text."],
   ["h6", "i expect spontaneous speech to be worse than read speech."],
   ["h7", "i expect whisper to drop or change tone marks and underdots."],
-  ["h8", "i expect forcing yoruba to differ from auto-detect on code-switched clips."],
+  ["h8", "i expect forcing Yoruba to differ from auto-detect on code-switched clips."],
 ];
 
 export const datasets: string[][] = [
-  ["naijavoices yoruba", "train, val, test", "900 (495), 100 (64), 300 (139)", "cc by-nc-sa 4.0, unofficial mirror"],
-  ["fleurs yoruba", "test, first 100 scored", "300 (no speaker ids)", "cc by 4.0"],
+  ["naijavoices Yoruba", "train, val, test", "900 (495), 100 (64), 300 (139)", "cc by-nc-sa 4.0, unofficial mirror"],
+  ["fleurs Yoruba", "test, first 100 scored", "300 (no speaker ids)", "cc by 4.0"],
   ["voxpopuli english", "test, first 100 scored", "300 (153)", "cc0"],
   ["l2-arctic english", "test, first 100 scored", "300 (24)", "cc by-nc 4.0"],
 ];
@@ -22,7 +22,7 @@ export const datasets: string[][] = [
 export const method: string[] = [
   "model: i ran whisper-small at revision 973afd24965f72e36ca33b3055d56a652f456b4d, greedy decoding, 30 second chunks, language set per clip. letting whisper detect the language is a separate comparison.",
   "adapter: i trained lora through peft, rank 8, alpha 16, dropout 0.05, on q_proj and v_proj only. that trains 884,736 of 242,619,648 parameters (0.36%). the narrow target is my choice.",
-  "training: i trained on 15 and 30 minute audio budgets from naijavoices yoruba, with early stopping on validation wer. test clips never reach the trainer.",
+  "training: i trained on 15 and 30 minute audio budgets from naijavoices Yoruba, with early stopping on validation wer. test clips never reach the trainer.",
   "gates: i set the pilot gates before any run and did not loosen them after seeing results.",
   "compute: i ran on a kaggle t4, fp16 training and fp32 evaluation. transformers 5.20.2, peft 0.21.2, torch 2.11.0, accelerate 1.15.0, datasets 4.8.5.",
 ];
@@ -33,7 +33,7 @@ export const metrics: string[][] = [
   ["error mix, hallucination rate", "used", "insertion share and output that has nothing to do with the audio."],
   ["diacritic retention, adjusted", "used with care", "tone marks and underdots present in the output, loops excluded. it does not check they are in the right place."],
   ["diacritic retention, old", "not trusted", "pooled across clips, so loops inflate it."],
-  ["wrong-script rate", "not trusted on looped runs", "skips combining marks and cannot tell yoruba from english, both latin."],
+  ["wrong-script rate", "not trusted on looped runs", "skips combining marks and cannot tell Yoruba from english, both latin."],
   ["train loss", "not quoted", "the logged value is about 4 times the true mean. eval loss is quoted instead."],
 ];
 

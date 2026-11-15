@@ -10,8 +10,10 @@ import {
   repo,
   sources,
 } from "@/lib/content";
+import { Highlighter } from "@/components/ui/highlighter";
 
 const prose = "max-w-[62ch] text-lg leading-relaxed";
+
 // The site's one underline treatment. Two layers: `before` is a 1px hairline at
 // 30% opacity, always on, so the link reads as a link at rest; `after` is the 2px
 // rule that draws left→right on hover/focus and retracts right→left.
@@ -22,6 +24,76 @@ const prose = "max-w-[62ch] text-lg leading-relaxed";
 // (it grows from the left).
 const link =
   "relative inline-block before:absolute before:inset-x-0 before:bottom-0 before:h-px before:bg-current before:opacity-30 before:content-[''] after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:origin-right after:scale-x-0 after:bg-current after:content-[''] after:transition-[scale] after:duration-[250ms] after:ease-out hover:after:origin-left hover:after:scale-x-100 focus-visible:after:origin-left focus-visible:after:scale-x-100 motion-reduce:after:transition-none";
+
+// One colour, one meaning. If a word does not fall in a category below it stays
+// plain — decoration is what made the first pass unreadable.
+const ORANGE = "#FF9D00";       // key subject or identifier: model, method, language, commit
+const LIGHT_BLUE = "#93C5FD";   // an important number: budget, error rate
+const LIGHT_RED = "#FCA5A5";    // a warning: a test that failed, a result that cannot be read
+const LIGHT_GREEN = "#86EFAC";  // a check that passed or a failure that was recovered
+const LIGHT_PURPLE = "#C4B5FD"; // a dataset name
+
+type Action =
+  | "highlight"
+  | "underline"
+  | "box"
+  | "circle"
+  | "strike-through"
+  | "crossed-off"
+  | "bracket";
+
+type Terms = Record<string, { color: string; action?: Action }>;
+
+// Splits `text` on every occurrence of each `needle` and wraps the match in a
+// Highlighter, leaving the rest of the string as plain text. Used to inject
+// inline annotations into strings that come from content.ts as plain strings.
+//
+// Overlap precedence is deterministic rather than incidental: matches sort by
+// index, then by length descending, so at equal start the longest needle wins
+// (`whisper-small` beats `whisper`) and the loser is dropped entirely. Sorting
+// by index alone would let JS key-insertion order decide which annotation
+// renders. Phase 3, substring collision.
+function mark(text: string, terms: Terms): ReactNode {
+  const matches: { index: number; length: number; needle: string }[] = [];
+  for (const needle of Object.keys(terms)) {
+    let idx = text.indexOf(needle);
+    while (idx !== -1) {
+      matches.push({ index: idx, length: needle.length, needle });
+      idx = text.indexOf(needle, idx + 1);
+    }
+  }
+  matches.sort((a, b) => a.index - b.index || b.length - a.length);
+
+  // Drop overlapping matches: "whisper" would otherwise match inside
+  // "whisper-small" and produce two stacked annotations on one word.
+  const nonOverlapping: typeof matches = [];
+  let lastEnd = -1;
+  for (const m of matches) {
+    if (m.index >= lastEnd) {
+      nonOverlapping.push(m);
+      lastEnd = m.index + m.length;
+    }
+  }
+
+  const parts: ReactNode[] = [];
+  let last = 0;
+  for (const m of nonOverlapping) {
+    if (m.index > last) {
+      parts.push(text.slice(last, m.index));
+    }
+    const { color, action = "circle" } = terms[m.needle];
+    parts.push(
+      <Highlighter key={`${m.needle}-${m.index}`} action={action} color={color}>
+        {m.needle}
+      </Highlighter>,
+    );
+    last = m.index + m.length;
+  }
+  if (last < text.length) {
+    parts.push(text.slice(last));
+  }
+  return <>{parts}</>;
+}
 
 function Section({
   id,
@@ -93,6 +165,35 @@ function Dot({ offset = "mt-[0.7rem]" }: { offset?: string }) {
   );
 }
 
+// The title and the body are different strings and are annotated separately.
+// Every "failed / bad / quota" needle lives in the *title* (`deviations[n][0]`),
+// which is why the first pass — which only ran mark() over the body — put zero
+// highlights in this section. Phase 2, verbatim-needle assumption.
+const deviationTitleTerms: Terms = {
+  "bad test": { color: LIGHT_RED, action: "highlight" },
+  "failed its gates": { color: LIGHT_RED, action: "highlight" },
+  "failed twice": { color: LIGHT_RED, action: "highlight" },
+  "colab ran out of my gpu quota": { color: LIGHT_RED, action: "highlight" },
+};
+
+const deviationTextTerms: Terms = {
+  // identifiers: the commit that shipped the bad test, and the one that fixed it
+  "commit 7016051": { color: ORANGE, action: "circle" },
+  "08dfe48": { color: LIGHT_GREEN, action: "circle" },
+  // the error rates themselves, not a description of them
+  "142.4%": { color: LIGHT_BLUE, action: "underline" },
+  "127.5%": { color: LIGHT_BLUE, action: "underline" },
+  "97.13%": { color: LIGHT_BLUE, action: "underline" },
+  "131.6%": { color: LIGHT_BLUE, action: "underline" },
+  // why the validation and test numbers above cannot be compared
+  "without chunking": { color: LIGHT_RED, action: "highlight" },
+  // a check that passed after the session reset
+  "manifest hashes matched": { color: LIGHT_GREEN, action: "underline" },
+  // the two datasets whose group names collide
+  naijavoices: { color: LIGHT_PURPLE, action: "circle" },
+  voxpopuli: { color: LIGHT_PURPLE, action: "circle" },
+};
+
 function Rows({ items }: { items: [string, string][] }) {
   return (
     <ul className="divide-y divide-black/10 border-y border-black/10">
@@ -102,9 +203,11 @@ function Rows({ items }: { items: [string, string][] }) {
               line; the larger bullet rows use the Dot default for `text-lg`. */}
           <Dot offset="mt-[0.45rem]" />
           <div>
-            <p className="font-sans text-sm font-medium">{title}</p>
+            <p className="font-sans text-sm font-medium">
+              {mark(title, deviationTitleTerms)}
+            </p>
             <p className="mt-1 max-w-[62ch] leading-relaxed text-black/70">
-              {text}
+              {mark(text, deviationTextTerms)}
             </p>
           </div>
         </li>
@@ -113,21 +216,44 @@ function Rows({ items }: { items: [string, string][] }) {
   );
 }
 
+// Term sets are per-list, not shared. A shared set leaks across corpora: with
+// one set for hypotheses + limitations + sources, `adapter` landed on two
+// limitation rows where it is incidental, and `lora` / `15 and 30 minute`
+// matched nothing at all. Phase 3, wrong-field matching.
+//
+// The hypotheses are eight predictions, so there is no measured value and no
+// failure inside them to flag — circling `adapter` and `Yoruba` there only
+// repeated nouns the paragraph above already carried. The one thing a reader
+// must not misread is that h1 is descriptive, not a test, so that is the mark.
+const hypothesisTerms: Terms = {
+  "descriptive only": { color: LIGHT_RED, action: "highlight" },
+};
+
+const limitationTerms: Terms = {
+  // the four limits that change how the report should be read
+  "one seed per run": { color: LIGHT_RED, action: "highlight" },
+  "cannot separate": { color: LIGHT_RED, action: "highlight" },
+  "no live demo": { color: LIGHT_RED, action: "highlight" },
+  "unofficial mirror": { color: LIGHT_RED, action: "highlight" },
+};
+
 function Bullets({
   items,
   textClassName,
   dotOffset,
+  terms,
 }: {
   items: string[];
   textClassName: string;
   dotOffset?: string;
+  terms?: Terms;
 }) {
   return (
     <ul className="divide-y divide-black/10 border-y border-black/10">
       {items.map((text) => (
         <li key={text} className="grid grid-cols-[1.25rem_1fr] gap-3 py-4">
           <Dot offset={dotOffset} />
-          <span className={textClassName}>{text}</span>
+          <span className={textClassName}>{mark(text, terms ?? {})}</span>
         </li>
       ))}
     </ul>
@@ -139,10 +265,17 @@ export default function Report() {
     <>
       <Section id="question" title="question">
         <p className={prose}>
-          i trained a small lora adapter on 15 to 30 minutes of audio and asked
-          whether it closes whisper-small&apos;s gap on yoruba, and what it
-          costs on other speech. yoruba is my main language axis. accent is a
-          second axis, which i pool only.
+          i trained a small <Highlighter action="highlight" color="#14EFFF">
+            lora adapter
+          </Highlighter> on 15 to 30 minutes of audio and asked whether it
+          closes <span className="italic">
+            whisper-small&apos;s
+          </span> gap on{" "}
+          <span className="font-medium">
+            Yoruba
+          </span>, and
+          what it costs on other speech. Yoruba is my main language axis.
+          accent is a second axis, which i pool only.
         </p>
         <p className={prose}>
           this is my report. every number comes with its interval and sample
@@ -152,6 +285,7 @@ export default function Report() {
           items={hypotheses.map(([, text]) => text)}
           textClassName="max-w-[62ch] leading-relaxed"
           dotOffset="mt-[0.6rem]"
+          terms={hypothesisTerms}
         />
       </Section>
 
@@ -170,7 +304,11 @@ export default function Report() {
       <Section id="method" title="method">
         {method.map((p) => (
           <p key={p} className={prose}>
-            {p}
+            {mark(p, {
+              "whisper-small": { color: ORANGE, action: "circle" },
+              lora: { color: ORANGE, action: "circle" },
+              "15 and 30 minute": { color: LIGHT_BLUE, action: "box" },
+            })}
           </p>
         ))}
         <Table head={["metric", "status", "note"]} rows={metrics} />
@@ -194,10 +332,15 @@ export default function Report() {
       </Section>
 
       <Section id="limitations" title="limitations">
-        <Bullets items={limitations} textClassName={`${prose} text-black/80`} />
+        <Bullets
+          items={limitations}
+          textClassName={`${prose} text-black/80`}
+          terms={limitationTerms}
+        />
       </Section>
 
       <Section id="sources" title="sources">
+        {/* Sources are names and links: no number, no warning, nothing to mark. */}
         <Bullets
           items={sources}
           textClassName="font-sans text-sm text-black/80"

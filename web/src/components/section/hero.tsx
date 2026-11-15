@@ -25,8 +25,7 @@ const Hero = () => {
         <h1 className="max-w-[26ch] text-balance text-4xl leading-[1.05] tracking-[-0.03em] sm:text-5xl">
           a study of{" "}
           <Highlighter action="circle" color="#FF9D00">
-            {" "}
-            <span className="italic">whisper-small</span>{" "}
+            <span className="italic">whisper-small</span>
           </Highlighter>{" "}
           across languages and accents
           {/* a study of <span className="font-thin italic">whisper-small</span> across languages and accents */}
