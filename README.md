@@ -80,4 +80,12 @@ public datasets and own recordings only. audio is git-ignored and never committe
 
 ## sources and credits
 
-tbd: datasets (fleurs, common voice), models (openai/whisper-small), libraries (transformers, peft, datasets, gradio), ai tools used (claude), each with a link.
+- whisper (openai): https://github.com/openai/whisper
+- peft (hugging face): https://github.com/huggingface/peft
+- naijavoices: emezue and the naijavoices community, interspeech 2025, https://arxiv.org/abs/2505.20564 (audio used via an unofficial mirror)
+- fleurs: https://arxiv.org/abs/2205.12446
+- voxpopuli: https://arxiv.org/abs/2101.00390
+- l2-arctic: https://psi.engr.tamu.edu/l2-arctic-corpus/
+- compute: kaggle and google colab
+- [the yoruba speaker, if they agree, by name or as a native yoruba speaker]
+- ai tools: claude (research, planning, code review) and a coding agent (repo work)
