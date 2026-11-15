@@ -38,10 +38,10 @@ const Hero = () => {
         </p>
       </div>
 
-      <div className="flex flex-col items-center gap-3 md:flex-row md:items-center md:justify-center">
+      <div className="flex items-center gap-3 flex-row md:items-center md:justify-center">
         <a
           href="#results"
-          className="flex h-11 min-w-fit items-center justify-center rounded-full bg-black px-5 font-sans text-sm font-medium tracking-normal text-white transition-transform hover:scale-[1.02] active:scale-[0.98] md:h-12 md:text-md"
+          className="flex h-11 min-w-fit items-center justify-center rounded-full bg-black px-6 font-sans text-sm font-medium tracking-normal text-white transition-transform hover:scale-[1.02] active:scale-[0.98] md:h-12 md:text-md"
         >
           see results
         </a>
