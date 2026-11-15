@@ -315,10 +315,72 @@ export default function Report() {
       </Section>
 
       <Section id="results" title="results">
-        <p className={prose}>
-          i will put the numbers here once i freeze the runs.
-        </p>
-      </Section>
+  <p className={prose}>
+    whisper-small is very bad at Yoruba and fine at english. the adapter stops
+    most of the repetition loops, but it does not yet transcribe Yoruba
+    accurately, and it costs english. every number here is descriptive, from
+    one seed per run.
+  </p>
+  <Table
+    head={["set", "clips (speakers)", "zero-shot wer", "adapter wer", "paired difference"]}
+    rows={[
+      ["naijavoices Yoruba test", "300 (139)", "940.0% [825.6, 1059.9]", "131.6% [110.8, 154.6]", "-808.4 pp [-913.9, -707.0]"],
+      ["fleurs Yoruba", "100 (no speaker ids)", "367.4% [307.9, 427.9]", "124.6% [108.6, 143.5]", "-242.8 pp [-304.7, -181.3]"],
+      ["voxpopuli english", "100 (68)", "10.6% [8.4, 12.9]", "17.6% [13.9, 21.8]", "+7.0 pp [+4.2, +10.7]"],
+      ["l2-arctic english", "100 (24)", "8.7% [5.3, 13.0]", "108.6% [71.5, 148.4]", "+99.9 pp [+61.9, +148.1]"],
+    ]}
+  />
+  <p className={prose}>
+    wer can pass 100% because a model can add more wrong words than the
+    reference has. the zero-shot Yoruba output is mostly one character
+    repeated until the token limit. the fleurs zero-shot number comes from a
+    batch size 1 run and the adapter number from batch size 8. the other pairs
+    are matched. all intervals are 95% bootstrap intervals. fleurs intervals
+    are clip-level, so they are optimistic.
+  </p>
+  <Table
+    head={["naijavoices test, 300 clips", "loop rate", "wer without looped clips", "clips left out"]}
+    rows={[
+      ["zero-shot", "77.0%", "104.9%", "231"],
+      ["adapter", "10.3%", "92.1%", "31"],
+    ]}
+  />
+  <p className={prose}>
+    most of the adapter gain is loop suppression. on clips that do not loop,
+    wer only moves from 104.9% to 92.1%, and 115 of 300 adapter clips sit at
+    exactly 100%. this view leaves clips out, so it changes the denominator
+    and i did it after seeing the results. on fleurs the loops fall from 64 to
+    26 of 100 clips, and wer without looped clips is 95.6% against 108.4%.
+    on accented english the cost is real even without loops: 45.7% against
+    8.7%.
+  </p>
+  <p className={prose}>
+    letting whisper detect the language on the first 100 fleurs clips gave
+    332.0% [272.3, 390.8] against 367.4% with Yoruba forced. the paired
+    difference is +35.3 pp [+7.7, +64.9], so auto-detect is slightly better
+    here. 76 of 100 outputs are identical. a separate detection pass labelled
+    86 clips Yoruba, 12 Swahili, 1 Nepali and 1 Shona. all 14 clips labelled
+    other than Yoruba differ, and 10 clips labelled Yoruba differ too. that
+    pass is not proof of what the transcriber chose, and i have not tested
+    code-switched speech.
+  </p>
+  <Table
+    head={["wer on clips without loops", "with marks", "marks removed", "errors that vanish [95% ci]"]}
+    rows={[
+      ["adapter, naijavoices", "92.1%", "72.7%", "21.0% [18.8, 23.3]"],
+      ["zero-shot, naijavoices", "104.9%", "96.7%", "7.8% [5.5, 10.5]"],
+      ["adapter, fleurs", "95.6%", "72.9%", "23.7% [20.4, 27.1]"],
+      ["zero-shot, fleurs", "108.4%", "95.3%", "12.0% [9.3, 14.6]"],
+    ]}
+  />
+  <p className={prose}>
+    removing tone marks and underdots from both sides fixes only a minority of
+    word errors, about 1 in 5 for the adapter and about 1 in 10 for zero-shot.
+    most errors are wrong words or wrong letters. this proxy does not check
+    whether the marks that are present are correct, so i leave h7 partly
+    answered.
+  </p>
+</Section>
 
       <Section id="deviations" title="deviations">
         <p className={prose}>
