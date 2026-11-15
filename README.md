@@ -95,11 +95,13 @@ public datasets and own recordings only. audio is git-ignored and never committe
 
 `data.py` never makes up speaker ids: sources without one (fleurs) are refused unless `--allow-clip-level` is passed, and the resulting groups are flagged in `audit.json`.
 
+yoruba audio: i used naijavoices yoruba audio from a third-party mirror (huggingface.co/datasets/EYEDOL/naija-voices-yoruba-split_0-0) to save time during the hackathon. i did not have official access when the runs were made. on 16 november 2026, after the runs, i registered for a naijavoices explorer membership (academic and research use) and was granted official access on hugging face. the original is licensed cc by-nc-sa 4.0. this is non-commercial research. no audio is published and the adapters are not distributed. the repo holds the reference text and model output for the scored clips. the data includes child speakers. i have not checked that the mirror matches the original's yoruba-batch-0.
+
 ## sources and credits
 
 - whisper (openai): https://github.com/openai/whisper
 - peft (hugging face): https://github.com/huggingface/peft
-- naijavoices: emezue and the naijavoices community, interspeech 2025, https://arxiv.org/abs/2505.20564. the licence is cc by-nc-sa 4.0 on the original's card (https://huggingface.co/datasets/naijavoices/naijavoices-dataset). the audio came from an unofficial mirror (https://huggingface.co/datasets/EYEDOL/naija-voices-yoruba-split_0-0) that states no licence. the data includes child speakers.
+- naijavoices: emezue and the naijavoices community, interspeech 2025, https://arxiv.org/abs/2505.20564. the licence is cc by-nc-sa 4.0 on the original's card (https://huggingface.co/datasets/naijavoices/naijavoices-dataset). the audio came from a third-party mirror (https://huggingface.co/datasets/EYEDOL/naija-voices-yoruba-split_0-0) that states no licence. the data includes child speakers.
 - fleurs: https://arxiv.org/abs/2205.12446
 - voxpopuli: https://arxiv.org/abs/2101.00390
 - l2-arctic: https://psi.engr.tamu.edu/l2-arctic-corpus/
