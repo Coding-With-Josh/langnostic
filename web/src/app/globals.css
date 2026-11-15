@@ -85,7 +85,7 @@
      explicit trailing serif stack keeps the degraded state deterministic, and
      sitting in `base` means the `font-sans`/`font-serif` utilities still win. */
   html {
-    font-family: var(--font-copernicus), Georgia, "Times New Roman", serif;
+    font-family: var(--font-host-grotesk), system-ui, sans-serif;
   }
 }
 
