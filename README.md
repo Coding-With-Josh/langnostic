@@ -2,11 +2,9 @@
 
 [![open in colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Coding-With-Josh/langnostic/blob/main/notebooks/colab_run.ipynb)
 
-> working name; rename the repo and the `speechgap` package if it changes.
+this project measures how well whisper-small transcribes yoruba, english and accented english, and tests whether a small lora adapter trained on 15 to 30 minutes of yoruba audio narrows the yoruba gap, and what that costs on english.
 
-does speech recognition hear every language and accent equally well? this project measures whisper-small across languages and accents, looks at where the gaps come from, and tests whether a small lora adapter trained on 15 to 30 minutes of audio narrows them, and what that costs on other groups.
-
-built for the veritas ai international high school hackathon 2026 (track: ai + languages).
+built for the veritas ai international high school hackathon 2026 (track: ai + languages). built by Joshua Idele, solo.
 
 **site:** [langnostic.vercel.app](https://langnostic.vercel.app)
 
@@ -20,9 +18,11 @@ a 30-minute lora adapter cuts yoruba wer on held-out speakers from 940.0% to 131
 
 the adapter costs english: 17.6% wer on english read (from 10.6%) and 108.6% on accented l2-arctic english (from 8.7%).
 
-h7 proxy: stripping tone marks and underdots removes only a minority of word errors: 13.8% of all-clip errors on the naija adapter and 14.5% on the fleurs adapter, and 21.0% and 23.7% on the non-looped clips; no cache or clip set exceeds 23.7%. it does not check whether the marks that are present are correct.
+h7 (tone marks) proxy: stripping tone marks and underdots removes only a minority of word errors: 13.8% of all-clip errors on the naija adapter and 14.5% on the fleurs adapter, and 21.0% and 23.7% on the non-looped clips; no cache or clip set exceeds 23.7%. it does not check whether the marks that are present are correct.
 
 these are descriptive: one seed per run, no confirmatory claim, and fleurs has no speaker ids, so its intervals are clip-level and optimistic. every number above comes from the committed reports in `results/`; intervals, the deviations log and the rest of the report are on the [site](https://langnostic.vercel.app).
+
+limits: one seed per run. the 15-minute adapter failed its validation gate twice and is not used. the 30-minute run passed validation (97.1% wer) but scored 131.6% on test, partly because validation decodes without chunking and test uses 30-second chunks. the language token is unverified for adapter runs, and the english rows are forced to english. dropping looped clips is a post-hoc view. fleurs intervals are clip-level. a native speaker corrected the reference for one example clip; no native speaker has scored the model outputs.
 
 ## repo layout
 
@@ -36,10 +36,11 @@ these are descriptive: one seed per run, no confirmatory claim, and fleurs has n
 | `speechgap/eval.py` | transcribe a manifest with whisper (+ optional adapter), cache the output; colab t4 or mps |
 | `speechgap/train.py` | train a rank-8 lora adapter on one group, speaker-disjoint from val/test, cached to `checkpoints/` |
 | `speechgap/report.py` | score cached transcripts per group; no model needed |
+| `speechgap/diacritic_share.py` | h7 (tone marks) proxy: score with and without tone marks and underdots |
 | `tests/` | stdlib tests: metrics, manifest contract, split/cap invariants, cache resume |
 | `tests/fixtures/` | a tiny transcript file the report cli can run against without a model |
-| `.github/workflows/tests.yml` | cpu-only ci: all stdlib tests plus a report smoke test |
-| `results/cache/` | cached transcripts, committed so scoring and the demo run without a gpu |
+| `.github/workflows/tests.yml` | cpu-only ci: stdlib tests and a report smoke test run in ci; four torch tests skip in ci by design |
+| `results/cache/` | cached transcripts, committed so scoring runs without a gpu |
 | `data/` | local audio and manifests, git-ignored |
 | `notebooks/` | the colab runner (build → transcribe → report) |
 
@@ -84,11 +85,11 @@ python -m speechgap.eval --manifest data/manifest_test.jsonl --device cuda \
 
 a transcription run writes `<out>.part` first and renames it only when every row is done. if colab disconnects, rerun the same command with `--resume`; it keeps validated rows and never lets a truncated file be scored.
 
-github actions is cpu-only and dependency-free: it runs the stdlib tests and the report smoke test, not whisper, dataset streaming, or training.
+stdlib tests and a report smoke test run in ci; four torch tests skip in ci by design.
 
 ## data and privacy
 
-public datasets and own recordings only. audio is git-ignored and never committed. nobody else is recorded without permission. the demo processes uploaded audio in memory and never stores it. only cached transcripts and report json ship in the repo.
+public datasets and own recordings only. audio is git-ignored and never committed. nobody else is recorded without permission. there is no live demo; the site shows precomputed results only. the adapters are not distributed. only cached transcripts and report json ship in the repo.
 
 `data.py` never makes up speaker ids: sources without one (fleurs) are refused unless `--allow-clip-level` is passed, and the resulting groups are flagged in `audit.json`.
 
@@ -96,10 +97,23 @@ public datasets and own recordings only. audio is git-ignored and never committe
 
 - whisper (openai): https://github.com/openai/whisper
 - peft (hugging face): https://github.com/huggingface/peft
-- naijavoices: emezue and the naijavoices community, interspeech 2025, https://arxiv.org/abs/2505.20564 (audio used via an unofficial mirror)
+- naijavoices: emezue and the naijavoices community, interspeech 2025, https://arxiv.org/abs/2505.20564. the licence is cc by-nc-sa 4.0 on the original's card (https://huggingface.co/datasets/naijavoices/naijavoices-dataset). the audio came from an unofficial mirror (https://huggingface.co/datasets/EYEDOL/naija-voices-yoruba-split_0-0) that states no licence. the data includes child speakers.
 - fleurs: https://arxiv.org/abs/2205.12446
 - voxpopuli: https://arxiv.org/abs/2101.00390
 - l2-arctic: https://psi.engr.tamu.edu/l2-arctic-corpus/
 - compute: kaggle and google colab
-- [the yoruba speaker, if they agree, by name or as a native yoruba speaker]
-- ai tools: claude (research, planning, code review) and a coding agent (repo work)
+- yoruba speaker: Diamond Olamide-OLMD recorded two voice notes and typed both transcripts, with consent. no result uses them. he also corrected the reference text for one example clip.
+- ai tools: a coding agent did the repo work (speechgap, tests, ci) under my direction; claude was used for research, planning, code review and drafting the write-up.
+- transformers: https://github.com/huggingface/transformers
+- datasets: https://github.com/huggingface/datasets
+- accelerate: https://github.com/huggingface/accelerate
+- jiwer: https://github.com/jitsi/jiwer
+- soundfile: https://github.com/bastibe/python-soundfile
+- soxr: https://github.com/paulmuaddib/pysoxr
+- librosa: https://github.com/librosa/librosa
+- pandas: https://github.com/pandas-dev/pandas
+- matplotlib: https://github.com/matplotlib/matplotlib
+- gradio: https://github.com/gradio-app/gradio
+- huggingface_hub: https://github.com/huggingface/huggingface_hub
+- aiohttp: https://github.com/aio-libs/aiohttp
+- pytest: https://github.com/pytest-dev/pytest
