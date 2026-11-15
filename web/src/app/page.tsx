@@ -13,7 +13,12 @@ export default function Home() {
         <Hero />
          <Report />
       </div>
-      <div className="absolute bottom-0 left-4 text-[100px]">
+      {/* `fixed`, not `absolute`: this wrapper's parent is as tall as the whole
+          report, so `absolute bottom-0` put the counter at the bottom of the
+          *document* — tens of thousands of pixels below the fold, which is why
+          nothing ever appeared. `fixed` pins it to the viewport, which is the
+          frame the count is about. */}
+      <div className="fixed bottom-0 left-4 text-[100px]">
         <LoadingCounter />
       </div>
     </div>
