@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { Geist_Mono, Google_Sans_Flex, Host_Grotesk } from "next/font/google";
+import { Analytics } from "@vercel/analytics/react";
+import Menu from "@/components/effects/menu";
 import "./globals.css";
 
 /**
@@ -120,6 +122,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${hostGrotesk.variable} ${geistMono.variable} h-full antialiased`}
     >
+      {/* Analytics is best-effort client telemetry: it must never gate render. */}
+      <Analytics />
       <body className="min-h-full flex flex-col">
         {/* JSON-LD for the report. "<" is escaped so no field can ever close
             the script element early; everything else is inert script data. */}
@@ -130,6 +134,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           }}
         />
         {children}
+        <Menu />
       </body>
     </html>
   );
